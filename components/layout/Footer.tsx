@@ -70,10 +70,10 @@ export function Footer() {
             <ul className="flex flex-col gap-2">
               <li>
                 <a
-                  href="mailto:hello@bitnetinc.com"
+                  href="mailto:support@bitnetinc.com"
                   className="font-body text-sm text-teal-50/65 hover:text-teal-50 transition-colors"
                 >
-                  hello@bitnetinc.com
+                  support@bitnetinc.com
                 </a>
               </li>
               <li>
