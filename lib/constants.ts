@@ -126,7 +126,7 @@ export const navItems = [
 ]
 
 export const contactInfo = [
-  { Icon: Mail, label: '// email', value: 'hello@bninc.com' },
+  { Icon: Mail, label: '// email', value: 'support@bitnetinc.com' },
   { Icon: Clock, label: '// response time', value: 'Within one business day' },
 ]
 

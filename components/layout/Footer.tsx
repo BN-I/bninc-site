@@ -1,16 +1,16 @@
-import Link from 'next/link'
-import { services } from '@/lib/constants'
+import Link from "next/link";
+import { services } from "@/lib/constants";
 
 const companyLinks = [
-  { label: 'About', href: '/#why' },
-  { label: 'Process', href: '/#process' },
-  { label: 'Contact', href: '/contact' },
-]
+  { label: "About", href: "/#why" },
+  { label: "Process", href: "/#process" },
+  { label: "Contact", href: "/contact" },
+];
 
 const legalLinks = [
-  { label: 'Privacy Policy', href: '/privacy' },
-  { label: 'Terms of Service', href: '/terms' },
-]
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Terms of Service", href: "/terms" },
+];
 
 export function Footer() {
   return (
@@ -22,7 +22,8 @@ export function Footer() {
               BN<span className="text-teal-400">inc</span>
             </span>
             <p className="font-body text-sm text-teal-50/55 leading-relaxed max-w-[240px]">
-              A focused software engineering firm. Mobile apps, cross-platform, web, and AI.
+              A focused software engineering firm. Mobile apps, cross-platform,
+              web, and AI.
             </p>
           </div>
 
@@ -69,10 +70,10 @@ export function Footer() {
             <ul className="flex flex-col gap-2">
               <li>
                 <a
-                  href="mailto:hello@bninc.com"
+                  href="mailto:hello@bitnetinc.com"
                   className="font-body text-sm text-teal-50/65 hover:text-teal-50 transition-colors"
                 >
-                  hello@bninc.com
+                  hello@bitnetinc.com
                 </a>
               </li>
               <li>
@@ -102,5 +103,5 @@ export function Footer() {
         </div>
       </div>
     </footer>
-  )
+  );
 }

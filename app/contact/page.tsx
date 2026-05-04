@@ -1,39 +1,39 @@
-import type { Metadata } from 'next'
-import { Mail, Clock } from 'lucide-react'
-import { ContactForm } from '@/components/sections/ContactForm'
-import { JsonLd } from '@/components/layout/JsonLd'
-import { siteConfig } from '@/lib/seo'
+import type { Metadata } from "next";
+import { Mail, Clock } from "lucide-react";
+import { ContactForm } from "@/components/sections/ContactForm";
+import { JsonLd } from "@/components/layout/JsonLd";
+import { siteConfig } from "@/lib/seo";
 
 export const metadata: Metadata = {
-  title: 'Contact BNinc | Start Your Software Project',
+  title: "Contact BNinc | Start Your Software Project",
   description:
-    'Get in touch with BNinc. We respond within one business day. Free 30-minute discovery call available.',
+    "Get in touch with BNinc. We respond within one business day. Free 30-minute discovery call available.",
   alternates: { canonical: `${siteConfig.url}/contact` },
   openGraph: {
-    title: 'Contact BNinc | Start Your Software Project',
+    title: "Contact BNinc | Start Your Software Project",
     description:
-      'Get in touch with BNinc. We respond within one business day. Free 30-minute discovery call available.',
+      "Get in touch with BNinc. We respond within one business day. Free 30-minute discovery call available.",
     url: `${siteConfig.url}/contact`,
   },
   twitter: {
-    title: 'Contact BNinc | Start Your Software Project',
+    title: "Contact BNinc | Start Your Software Project",
     description:
-      'Get in touch with BNinc. We respond within one business day. Free 30-minute discovery call available.',
+      "Get in touch with BNinc. We respond within one business day. Free 30-minute discovery call available.",
   },
-}
+};
 
 const contactPageSchema = {
-  '@context': 'https://schema.org',
-  '@type': 'ContactPage',
-  name: 'Contact BNinc',
+  "@context": "https://schema.org",
+  "@type": "ContactPage",
+  name: "Contact BNinc",
   url: `${siteConfig.url}/contact`,
-  description: 'Get in touch with BNinc to start your software project.',
-}
+  description: "Get in touch with BNinc to start your software project.",
+};
 
 const contactInfo = [
-  { Icon: Mail, label: '// email', value: 'hello@bninc.com' },
-  { Icon: Clock, label: '// response time', value: 'Within one business day' },
-]
+  { Icon: Mail, label: "// email", value: "support@bitnetinc.com" },
+  { Icon: Clock, label: "// response time", value: "Within one business day" },
+];
 
 export default function ContactPage() {
   return (
@@ -49,8 +49,8 @@ export default function ContactPage() {
             Let's build something great.
           </h1>
           <p className="font-body font-light text-lg text-teal-50/65 max-w-[520px] leading-relaxed">
-            Tell us about your project. We'll respond within one business day with honest
-            thoughts and a clear next step.
+            Tell us about your project. We'll respond within one business day
+            with honest thoughts and a clear next step.
           </p>
         </div>
       </section>
@@ -64,7 +64,9 @@ export default function ContactPage() {
                   AC
                 </div>
                 <div>
-                  <p className="font-display font-bold text-teal-950">Aren Costanza</p>
+                  <p className="font-display font-bold text-teal-950">
+                    Aren Costanza
+                  </p>
                   <span className="font-mono text-xs text-teal-700/60 uppercase tracking-wide">
                     Engineering Lead
                   </span>
@@ -80,7 +82,9 @@ export default function ContactPage() {
                     <span className="font-mono text-xs text-teal-700/50 uppercase tracking-wide block mb-0.5">
                       {item.label}
                     </span>
-                    <p className="font-body text-sm text-teal-700">{item.value}</p>
+                    <p className="font-body text-sm text-teal-700">
+                      {item.value}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -90,8 +94,8 @@ export default function ContactPage() {
                   Not ready to commit?
                 </h4>
                 <p className="font-body text-sm text-teal-700 leading-relaxed mb-4">
-                  Book a free 30-minute discovery call. No sales pressure — just honest
-                  advice.
+                  Book a free 30-minute discovery call. No sales pressure — just
+                  honest advice.
                 </p>
                 <button className="border border-teal-400 text-teal-400 hover:bg-teal-400 hover:text-white font-display font-bold text-sm px-5 py-2 rounded transition-all duration-200 cursor-pointer">
                   Book a call →
@@ -106,5 +110,5 @@ export default function ContactPage() {
         </div>
       </section>
     </>
-  )
+  );
 }
