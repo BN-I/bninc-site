@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { services } from '@/lib/constants'
 
 const companyLinks = [
+  { label: 'Portfolio', href: '/portfolio' },
   { label: 'About', href: '/#why' },
   { label: 'Process', href: '/#process' },
   { label: 'Contact', href: '/contact' },
@@ -18,9 +19,8 @@ export function Footer() {
       <div className="max-w-[1280px] mx-auto px-8 py-16">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr] gap-12 pb-12 border-b border-teal-50/[0.08]">
           <div>
-            <span className="font-display font-extrabold text-xl text-white block mb-3">
-              BN<span className="text-teal-400">inc</span>
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-white.svg" alt="BNinc" className="h-7 w-auto mb-3" />
             <p className="font-body text-sm text-teal-50/55 leading-relaxed max-w-[240px]">
               A focused software engineering firm. Mobile apps, cross-platform, web, and AI.
             </p>

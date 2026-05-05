@@ -5,6 +5,7 @@ import { TechStack } from '@/components/sections/TechStack'
 import { FaqAccordion } from '@/components/sections/FaqAccordion'
 import { RelatedServices } from '@/components/sections/RelatedServices'
 import { CtaBand } from '@/components/sections/CtaBand'
+import { TiredusShowcase } from '@/components/sections/TiredusShowcase'
 import { JsonLd } from '@/components/layout/JsonLd'
 import { servicePages } from '@/lib/constants'
 import { siteConfig } from '@/lib/seo'
@@ -49,6 +50,7 @@ export default function AiIntegrationAgentsPage() {
         heroGlow={service.heroGlow}
         index={service.index}
       />
+      <TiredusShowcase />
       <FeaturesGrid
         features={service.features}
         heading="Practical AI that delivers measurable results."

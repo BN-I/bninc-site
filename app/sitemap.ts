@@ -23,6 +23,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: new Date(),
       priority: 0.9,
     },
+    { url: 'https://www.bninc.com/portfolio', lastModified: new Date(), priority: 0.85 },
     { url: 'https://www.bninc.com/contact', lastModified: new Date(), priority: 0.8 },
   ]
 }

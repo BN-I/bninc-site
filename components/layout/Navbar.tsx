@@ -20,9 +20,13 @@ export function Navbar() {
         }`}
       >
         <nav className="max-w-[1280px] mx-auto px-8 w-full flex items-center justify-between">
-          <Link href="/" className="font-display font-extrabold text-xl">
-            <span className="text-white">BN</span>
-            <span className="text-teal-400">inc</span>
+          <Link href="/" aria-label="BNinc home" className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-white.svg" alt="" className="h-8 w-auto" />
+            <span className="font-display font-extrabold text-xl">
+              <span className="text-white">BN</span>
+              <span className="text-teal-400">inc</span>
+            </span>
           </Link>
 
           <div className="hidden md:flex items-center gap-8">
@@ -73,6 +77,12 @@ export function Navbar() {
             </div>
 
             <Link
+              href="/portfolio"
+              className="font-display font-bold text-sm text-teal-50/80 hover:text-white transition-colors"
+            >
+              Portfolio
+            </Link>
+            <Link
               href="/#why"
               className="font-display font-bold text-sm text-teal-50/80 hover:text-white transition-colors"
             >
@@ -115,13 +125,13 @@ export function Navbar() {
             className="fixed inset-0 bg-teal-950 z-50 flex flex-col px-8 py-8"
           >
             <div className="flex items-center justify-between mb-12">
-              <Link
-                href="/"
-                onClick={() => setMobileOpen(false)}
-                className="font-display font-extrabold text-xl"
-              >
-                <span className="text-white">BN</span>
-                <span className="text-teal-400">inc</span>
+              <Link href="/" onClick={() => setMobileOpen(false)} aria-label="BNinc home" className="flex items-center gap-2.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo-white.svg" alt="" className="h-8 w-auto" />
+                <span className="font-display font-extrabold text-xl">
+                  <span className="text-white">BN</span>
+                  <span className="text-teal-400">inc</span>
+                </span>
               </Link>
               <button
                 onClick={() => setMobileOpen(false)}
@@ -157,6 +167,7 @@ export function Navbar() {
 
               <div className="flex flex-col gap-4">
                 {[
+                  { href: '/portfolio', label: 'Portfolio' },
                   { href: '/#why', label: 'About' },
                   { href: '/contact', label: 'Contact' },
                 ].map((item, i) => (
