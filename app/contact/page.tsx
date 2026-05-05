@@ -65,10 +65,10 @@ export default function ContactPage() {
                 </div>
                 <div>
                   <p className="font-display font-bold text-teal-950">
-                    Aren Costanza
+                    Ashley Romanov
                   </p>
                   <span className="font-mono text-xs text-teal-700/60 uppercase tracking-wide">
-                    Engineering Lead
+                    Director PR
                   </span>
                 </div>
               </div>
