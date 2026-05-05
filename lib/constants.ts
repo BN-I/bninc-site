@@ -65,8 +65,8 @@ export const services: Service[] = [
 ]
 
 export const stats = [
-  { value: 50, suffix: '+', label: '// projects delivered' },
-  { value: 4, suffix: '+', label: '// years experience' },
+  { value: 70, suffix: '+', label: '// projects delivered' },
+  { value: 10, suffix: '+', label: '// years experience' },
   { value: 98, suffix: '%', label: '// client satisfaction' },
   { value: 12, suffix: '+', label: '// industries served' },
 ]

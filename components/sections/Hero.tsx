@@ -50,10 +50,10 @@ export function Hero() {
 
             <div className="flex gap-6 flex-wrap">
               <span className="font-mono text-xs text-teal-50/40 uppercase tracking-wide">
-                // 50+ projects
+                // 70+ projects
               </span>
               <span className="font-mono text-xs text-teal-50/40 uppercase tracking-wide">
-                // 4+ years
+                // 10+ years
               </span>
               <span className="font-mono text-xs text-teal-50/40 uppercase tracking-wide">
                 // 98% satisfaction
