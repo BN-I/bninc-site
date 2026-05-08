@@ -1,0 +1,98 @@
+---
+title: App Store Optimization in 2025 — What Actually Moves the Needle
+description: A direct look at which ASO tactics produce real download growth and which ones waste your time. Keyword strategy, screenshots, ratings, and algorithm mechanics.
+date: 2026-04-30
+category: Mobile App Development
+keywords: [app store optimization, ASO strategy, app store keywords, app store screenshots, increase app downloads]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=1200&q=80&auto=format&fit=crop
+---
+
+App Store Optimization is one of those disciplines where the gap between conventional wisdom and what actually works is enormous. Most guides recommend the same five tactics. Most of those tactics produce marginal results. Here's what we've observed actually moving download numbers across apps we've shipped.
+
+## Keyword Research Is Not About Volume
+
+The instinct is to target high-volume keywords. The correct approach is to find keywords where your app has a realistic chance of ranking in the top 5.
+
+A keyword with 50,000 monthly searches where you rank 40th produces zero organic downloads. A keyword with 5,000 searches where you rank 3rd produces consistent installs every day.
+
+The mechanics to understand:
+
+- The App Store ranks apps by **relevance** (title, subtitle, keyword field match) and **performance signals** (conversion rate, ratings, download velocity)
+- Your title has the highest weight — keywords in the title rank roughly 3× stronger than those in the keyword field
+- The subtitle has the second highest weight
+- The 100-character keyword field is for terms that aren't covered by your title and subtitle
+
+A practical framework:
+
+| Keyword type | Where to target | Rationale |
+|---|---|---|
+| Primary (high-intent, moderate competition) | Title | Highest weight, must convert |
+| Secondary (descriptive, lower competition) | Subtitle | Second highest weight |
+| Long-tail, synonyms, adjacent terms | Keyword field | No spaces between words wastes characters |
+
+Use tools like AppFollow, Sensor Tower, or AppTweak to measure keyword difficulty — not just volume.
+
+## Screenshots Are Your Conversion Rate
+
+Impressions to downloads is your conversion rate, and screenshots are the primary lever for improving it. The App Store shows up to three screenshots before the user taps to see more. Those three screens do most of the work.
+
+What converts:
+
+**Benefit-forward captions, not feature descriptions.** "Book your next trip in 30 seconds" converts better than "New booking interface." The distinction is outcome vs. mechanism.
+
+**Real UI at full resolution.** Mockups and device frames are fine, but the UI needs to look exactly like the actual app. Mismatched screenshots relative to the real app experience tanked ratings in several apps we've audited.
+
+**Consistent visual hierarchy.** Each screenshot should focus on one thing. The most common mistake is loading screenshots with multiple UI elements and assuming users will read them — they don't. They glance for 0.3 seconds.
+
+A/B test your screenshots using Apple's Product Page Optimizations (available in App Store Connect). Test one variable at a time. Even a 10% conversion rate improvement compounds significantly at scale.
+
+## Ratings Are an Algorithmic Signal, Not Just a Trust Signal
+
+Apple's algorithm uses rating velocity (recent ratings) more heavily than lifetime average. An app with a 4.1 rating receiving 50 ratings per week can outrank an app with a 4.8 rating receiving 2 per week.
+
+The engineering implication: build your in-app review prompt around the right moment. Apple's `SKStoreReviewRequest` API presents the system prompt — you control the timing.
+
+The right moment is immediately after a user achieves a success:
+
+```swift
+import StoreKit
+
+// Trigger after user completes a meaningful action
+func onBookingConfirmed() {
+  if eligibleForReviewRequest() {
+    SKStoreReviewController.requestReview()
+  }
+}
+```
+
+Apple limits the prompt to three times per 365 days, so the timing matters. Don't ask on first launch. Don't ask after an error. Ask immediately after a user gets value from the app — a completed booking, a successful upload, a goal reached.
+
+React Native equivalent:
+
+```typescript
+import { requestReview } from 'expo-store-review'
+
+async function promptReview() {
+  const isAvailable = await isAvailableAsync()
+  if (isAvailable) {
+    await requestReview()
+  }
+}
+```
+
+## Search Ads Inform Organic Strategy
+
+Apple Search Ads (ASA) is not just a paid acquisition channel — it's an organic research tool. Running broad match campaigns reveals exactly which search terms convert users in your category. The keywords that convert in paid search are the keywords worth targeting organically.
+
+Run a discovery campaign with broad match on your 10 most important keywords. After two weeks, export the search term report and sort by conversion rate, not impressions. These are your organic keyword targets.
+
+## What Doesn't Move the Needle
+
+- **Keyword stuffing in the description**: Apple's algorithm does not index the description for keyword ranking. Write it for humans.
+- **Changing everything at once**: When multiple elements change simultaneously, you lose the ability to attribute what drove the change. Change one thing, measure for two weeks, iterate.
+- **Chasing seasonal keywords without volume data**: Seasonal targeting can work, but guessing at keywords without volume data produces no measurable result.
+
+---
+
+ASO is a compound investment — small improvements in keyword rank and conversion rate multiply into meaningful download growth over months, not days. If you're building an app and want a systematic approach to ASO from launch, [reach out to our team](/contact). We build ASO strategy into every mobile product we ship.

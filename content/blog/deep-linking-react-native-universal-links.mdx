@@ -1,0 +1,168 @@
+---
+title: Deep Linking in React Native — Universal Links, App Schemes, and Expo Router
+description: A complete guide to deep linking in React Native — configuring universal links on iOS, app links on Android, handling cold starts, and routing with Expo Router.
+date: 2026-04-02
+category: Mobile App Development
+keywords: [react native deep linking, universal links iOS, app links android, expo router deep links, mobile deep link]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1633356122102-3fe601e05bd2?w=1200&q=80&auto=format&fit=crop
+---
+
+Deep linking — the ability to open your app to a specific screen via a URL — is one of those features that seems simple until you actually implement it across iOS and Android. The two platforms have fundamentally different mechanisms, both require server-side configuration, and cold start handling trips up most implementations.
+
+Here's how we implement deep linking reliably.
+
+## Two Mechanisms, One Goal
+
+**iOS Universal Links** use HTTPS URLs (e.g. `https://yourapp.com/product/123`). iOS checks your server for an `apple-app-site-association` (AASA) file and, if the app is installed, opens the app instead of Safari. If the app is not installed, it falls through to the website.
+
+**Android App Links** work identically: HTTPS URLs, server verification via an `assetlinks.json` file, same fallback behaviour.
+
+**Custom URL schemes** (e.g. `yourapp://product/123`) are the older approach. They work without server configuration but have significant drawbacks: any app can register the same scheme, iOS shows a confirmation dialog for custom schemes in some contexts, and they provide no fallback if the app isn't installed.
+
+For new projects, always implement Universal Links / App Links. Custom schemes are a fallback for contexts where HTTPS links don't work (some email clients, QR codes in specific apps).
+
+## Server Configuration
+
+**iOS AASA file** at `https://yourdomain.com/.well-known/apple-app-site-association`:
+
+```json
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.com.yourcompany.yourapp",
+        "paths": ["/product/*", "/user/*", "/invite/*"]
+      }
+    ]
+  }
+}
+```
+
+The file must be served over HTTPS, return `application/json`, and not redirect. Apple CDN-caches this file aggressively — changes can take 24–48 hours to propagate.
+
+**Android assetlinks.json** at `https://yourdomain.com/.well-known/assetlinks.json`:
+
+```json
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.yourcompany.yourapp",
+    "sha256_cert_fingerprints": ["YOUR_APP_SIGNING_CERT_SHA256"]
+  }
+}]
+```
+
+Get your SHA256 fingerprint with: `keytool -list -v -keystore release.keystore`
+
+## Expo Router Configuration
+
+Expo Router handles deep links via file-based routing — your file structure maps to URL paths. In `app.json`:
+
+```json
+{
+  "expo": {
+    "scheme": "yourapp",
+    "intentFilters": [
+      {
+        "action": "VIEW",
+        "autoVerify": true,
+        "data": [
+          {
+            "scheme": "https",
+            "host": "yourdomain.com",
+            "pathPrefix": "/product"
+          }
+        ],
+        "category": ["BROWSABLE", "DEFAULT"]
+      }
+    ]
+  }
+}
+```
+
+With Expo Router, your `app/product/[id].tsx` file automatically handles `https://yourdomain.com/product/123`. The `id` param is available via `useLocalSearchParams`:
+
+```typescript
+// app/product/[id].tsx
+import { useLocalSearchParams } from 'expo-router'
+
+export default function ProductScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  // id = '123' when opened via deep link
+}
+```
+
+## Handling Cold Start
+
+The most commonly broken case: user taps a link while the app is not running. The app launches cold, and you need to route to the correct screen before the splash screen hides.
+
+With Expo Router, this is handled automatically — the router reads the initial URL from the launch options and navigates to the corresponding route before rendering.
+
+If you're on bare React Native with React Navigation:
+
+```typescript
+import { Linking } from 'react-native'
+
+const linking = {
+  prefixes: ['https://yourdomain.com', 'yourapp://'],
+  config: {
+    screens: {
+      Product: 'product/:id',
+      UserProfile: 'user/:username',
+      Invite: 'invite/:code',
+    },
+  },
+  // Called when app is launched from a deep link
+  async getInitialURL() {
+    const url = await Linking.getInitialURL()
+    return url
+  },
+  // Called when app receives a link while running
+  subscribe(listener: (url: string) => void) {
+    const sub = Linking.addEventListener('url', ({ url }) => listener(url))
+    return () => sub.remove()
+  },
+}
+
+export default function App() {
+  return (
+    <NavigationContainer linking={linking}>
+      {/* ... */}
+    </NavigationContainer>
+  )
+}
+```
+
+## Testing Deep Links
+
+Test on physical devices whenever possible — the simulator/emulator behaviour occasionally diverges from the real thing.
+
+**iOS Simulator:**
+```bash
+xcrun simctl openurl booted "https://yourdomain.com/product/123"
+```
+
+**Android Emulator:**
+```bash
+adb shell am start -W -a android.intent.action.VIEW -d "https://yourdomain.com/product/123"
+```
+
+**Expo dev client:**
+```bash
+npx uri-scheme open "yourapp://product/123" --ios
+```
+
+## Common Issues
+
+**AASA file not being picked up**: Verify the file is served with no redirects and correct Content-Type. Use Apple's AASA validator at `https://yurl.chayev.com/` to debug.
+
+**App Links not verified on Android**: `autoVerify: true` must be set and the assetlinks.json must be accessible. Test verification with `adb shell pm get-app-links com.yourpackage`.
+
+**Cold start navigation not working**: Ensure your navigation container is mounted before you process the initial URL. With React Navigation, the `linking` prop handles this ordering automatically.
+
+---
+
+Deep linking is often retrofitted onto apps as an afterthought. When it's part of the architecture from the start, the configuration is clean and the edge cases are handled. [Talk to our team](/contact) if you're building a React Native app and want deep linking done correctly the first time.

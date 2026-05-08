@@ -1,0 +1,141 @@
+---
+title: Mobile App Security — Protecting User Data on iOS and Android
+description: Practical security measures for production React Native apps — secure storage, certificate pinning, jailbreak detection, code obfuscation, and API key protection.
+date: 2026-03-26
+category: Mobile App Development
+keywords: [mobile app security, react native security, iOS keychain, android keystore, certificate pinning, mobile data protection]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1563013544-824ae1b704d3?w=1200&q=80&auto=format&fit=crop
+---
+
+Security in mobile apps is an area where most teams do the basics and assume they're covered. The basics — HTTPS, auth tokens, input validation — are necessary but not sufficient. A determined attacker on a jailbroken or rooted device can bypass most of them. The goal of mobile security is not perfect impermeability, but raising the cost of attack high enough that most attackers give up.
+
+Here's the practical checklist we apply to every production app.
+
+## Secure Storage
+
+The single most common security mistake in React Native apps is storing sensitive data in AsyncStorage. AsyncStorage is unencrypted and stored in plaintext on the device. On a rooted Android or jailbroken iOS device, it's trivially readable.
+
+**For tokens, keys, and credentials: use the platform keychain.**
+
+iOS Keychain and Android Keystore are hardware-backed secure enclaves on modern devices. Credentials stored here are encrypted at rest and can require biometric authentication to access.
+
+```typescript
+import * as SecureStore from 'expo-secure-store'
+
+// Write
+await SecureStore.setItemAsync('auth_token', token)
+
+// Read
+const token = await SecureStore.getItemAsync('auth_token')
+
+// Delete
+await SecureStore.deleteItemAsync('auth_token')
+```
+
+Expo SecureStore maps to iOS Keychain Services and Android Keystore. For sensitive data, this should be your only option.
+
+For less sensitive data that still needs some protection (user preferences, cached profile data), MMKV with encryption enabled is appropriate:
+
+```typescript
+import { MMKV } from 'react-native-mmkv'
+
+const storage = new MMKV({
+  id: 'secure-storage',
+  encryptionKey: 'your-encryption-key', // derive from keychain, not hardcoded
+})
+```
+
+Derive encryption keys from the platform keychain — never hardcode them in your application bundle.
+
+## API Key Protection
+
+There is no way to completely hide an API key bundled in a client app. A determined attacker with network inspection tools will find it. The correct approach is defence in depth:
+
+1. **Never embed secret keys in the client.** Public keys (Stripe publishable key, Google Maps API key) are acceptable. Secret keys should only exist on your server.
+2. **Restrict key permissions.** A Google Maps key should be restricted to the Maps SDK from your specific bundle ID. A Stripe key should only have the permissions needed for the client.
+3. **Use a backend proxy** for any third-party API that requires a secret key. Your client calls your server, your server calls the third party.
+
+```typescript
+// Bad: direct API call with secret key from client
+const response = await fetch('https://api.service.com/data', {
+  headers: { Authorization: `Bearer ${SECRET_KEY}` }
+})
+
+// Good: proxy through your own backend
+const response = await fetch('https://your-api.com/data', {
+  headers: { Authorization: `Bearer ${userAuthToken}` }
+})
+```
+
+For environment variables: `EXPO_PUBLIC_` prefix exposes them to the client bundle. Any variable that shouldn't be in the bundle should live server-side.
+
+## Certificate Pinning
+
+Certificate pinning prevents man-in-the-middle attacks by verifying that the SSL certificate presented by your server matches an expected public key. Even if an attacker installs a rogue certificate on the device, they can't intercept traffic to your API.
+
+```typescript
+import { fetch } from 'react-native-ssl-pinning'
+
+const response = await fetch('https://api.yourapp.com/data', {
+  method: 'GET',
+  sslPinning: {
+    certs: ['cert_sha256_hash'],
+  },
+  headers: { Authorization: `Bearer ${token}` },
+})
+```
+
+Pin your certificate's public key hash (not the certificate itself) so you can rotate certificates without app updates. Include a backup pin.
+
+Certificate pinning has a cost: you must update the app if pins expire or rotate. Build a pin rotation strategy into your release process before you ship pinning.
+
+## Jailbreak and Root Detection
+
+Jailbroken iOS and rooted Android devices disable some of the OS-level protections your app relies on. The secure keychain becomes more accessible, app sandboxing weakens, and code injection becomes possible.
+
+Detecting jailbreak/root doesn't mean refusing to run — it means adjusting behaviour: logging the event, requiring additional authentication, or disabling high-value features on compromised devices.
+
+```typescript
+import JailMonkey from 'jail-monkey'
+
+async function checkDeviceIntegrity() {
+  const isJailbroken = JailMonkey.isJailBroken()
+  const isOnExternalStorage = JailMonkey.isOnExternalStorage() // Android
+
+  if (isJailbroken) {
+    analyticsService.logEvent('compromised_device_detected')
+    // Optionally: require additional authentication
+    // Optionally: disable features that handle payment data
+  }
+}
+```
+
+No detection is foolproof — sophisticated jailbreaks can bypass these checks. This is a signal, not a guarantee.
+
+## Code Obfuscation
+
+React Native JavaScript bundles are readable text. Anyone who extracts your APK or IPA can read your application logic. For most apps this is an acceptable risk, but if you have proprietary algorithms or business logic in the JS bundle, obfuscation adds a barrier.
+
+For production builds, enable Hermes (which produces bytecode rather than readable JS) and apply a minifier. For stronger obfuscation, tools like `javascript-obfuscator` can be integrated into your Metro bundler config.
+
+For truly sensitive logic (DRM, anti-cheat, payment verification), move it to native modules. Native code is significantly harder to reverse-engineer than a JavaScript bundle.
+
+## Network Security Configuration
+
+On Android, explicitly declare which domains your app communicates with:
+
+```xml
+<!-- android/app/src/main/res/xml/network_security_config.xml -->
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="false">
+    <domain includeSubdomains="true">api.yourapp.com</domain>
+  </domain-config>
+</network-security-config>
+```
+
+Setting `cleartextTrafficPermitted="false"` prevents HTTP connections — your app will only communicate over HTTPS.
+
+---
+
+Security is a continuous process, not a feature you ship once. If you're building a mobile app that handles sensitive data, [our team builds with security requirements in mind from the architecture phase](/contact), not as an afterthought.

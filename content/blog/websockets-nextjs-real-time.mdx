@@ -1,0 +1,204 @@
+---
+title: WebSockets in Next.js — Real-Time Features Without a Separate Server
+description: How to add real-time functionality to Next.js apps — comparing WebSockets, Server-Sent Events, and managed services like Pusher and Ably for different use cases.
+date: 2026-01-22
+category: Web Application Development
+keywords: [nextjs websockets, real-time nextjs, server-sent events nextjs, Pusher nextjs, Ably nextjs, nextjs live updates]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1531746790731-6c087fecd65a?w=1200&q=80&auto=format&fit=crop
+---
+
+Real-time features — live notifications, collaborative editing, live dashboards, chat — require a persistent connection between client and server. Next.js is primarily a request-response framework, which creates a genuine architectural mismatch.
+
+There are several ways to resolve it, each with real trade-offs. The right choice depends on your scale requirements, deployment environment, and whether bidirectional communication is actually necessary.
+
+## The Options
+
+| Approach | Direction | Complexity | Deployment |
+|---|---|---|---|
+| Polling | Client → Server (repeated) | Low | Any |
+| Server-Sent Events | Server → Client | Low | Node.js server only |
+| WebSockets (custom server) | Bidirectional | Medium | Node.js server only |
+| Managed service (Pusher, Ably) | Bidirectional | Low | Any (including Vercel) |
+
+Polling works and is often underestimated for infrequent updates (every 30 seconds is fine for many use cases). For anything more frequent, it wastes server resources and produces noticeable latency.
+
+## Server-Sent Events — The Underrated Option
+
+SSE gives you server-to-client streaming over a standard HTTP connection. One direction only, but that's all many features need: live notifications, activity feeds, progress updates, dashboard refreshes.
+
+SSE works in Next.js App Router without a custom server:
+
+```typescript
+// app/api/events/route.ts
+export async function GET(request: Request) {
+  const encoder = new TextEncoder()
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const userId = getUserIdFromRequest(request)
+
+      const interval = setInterval(async () => {
+        const notifications = await getNewNotifications(userId)
+
+        if (notifications.length > 0) {
+          const data = `data: ${JSON.stringify(notifications)}\n\n`
+          controller.enqueue(encoder.encode(data))
+        }
+      }, 3000)
+
+      // Cleanup when client disconnects
+      request.signal.addEventListener('abort', () => {
+        clearInterval(interval)
+        controller.close()
+      })
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
+}
+```
+
+```typescript
+// Client-side hook
+function useNotifications() {
+  const [notifications, setNotifications] = useState([])
+
+  useEffect(() => {
+    const eventSource = new EventSource('/api/events')
+
+    eventSource.onmessage = (event) => {
+      setNotifications(JSON.parse(event.data))
+    }
+
+    return () => eventSource.close()
+  }, [])
+
+  return notifications
+}
+```
+
+SSE automatically reconnects on connection drop. The browser handles it.
+
+**Limitation**: SSE doesn't work on Vercel's Serverless Functions — the 10s function timeout kills long-lived connections. Use Vercel Edge Functions or a standalone Node.js server.
+
+## WebSockets with a Custom Next.js Server
+
+For bidirectional communication (chat, collaborative editing, multiplayer), you need WebSockets. This requires a custom server:
+
+```typescript
+// server.ts
+import { createServer } from 'http'
+import { parse } from 'url'
+import next from 'next'
+import { WebSocketServer } from 'ws'
+
+const app = next({ dev: process.env.NODE_ENV !== 'production' })
+const handle = app.getRequestHandler()
+
+app.prepare().then(() => {
+  const server = createServer((req, res) => {
+    const parsedUrl = parse(req.url!, true)
+    handle(req, res, parsedUrl)
+  })
+
+  const wss = new WebSocketServer({ server })
+
+  const rooms = new Map<string, Set<WebSocket>>()
+
+  wss.on('connection', (ws, req) => {
+    const roomId = new URL(req.url!, 'http://localhost').searchParams.get('room')
+
+    if (roomId) {
+      if (!rooms.has(roomId)) rooms.set(roomId, new Set())
+      rooms.get(roomId)!.add(ws)
+
+      ws.on('message', (data) => {
+        // Broadcast to all clients in the same room
+        rooms.get(roomId)?.forEach((client) => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(data)
+          }
+        })
+      })
+
+      ws.on('close', () => {
+        rooms.get(roomId)?.delete(ws)
+      })
+    }
+  })
+
+  server.listen(3000)
+})
+```
+
+This approach means you can't deploy to Vercel — you need a server that maintains state between requests (EC2, Fly.io, Railway, etc.).
+
+## Managed Services — The Pragmatic Choice
+
+For most production applications, a managed WebSocket service is the correct answer. You get bidirectionality, authentication, presence (who's online), and history — without managing WebSocket infrastructure.
+
+**Pusher** is the most established option:
+
+```typescript
+// Server — trigger an event
+import Pusher from 'pusher'
+
+const pusher = new Pusher({
+  appId: process.env.PUSHER_APP_ID!,
+  key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
+  secret: process.env.PUSHER_SECRET!,
+  cluster: 'eu',
+  useTLS: true,
+})
+
+// In your route handler, after a message is saved:
+await pusher.trigger(`chat-${roomId}`, 'new-message', {
+  id: message.id,
+  text: message.text,
+  userId: message.userId,
+  timestamp: message.createdAt,
+})
+```
+
+```typescript
+// Client
+import Pusher from 'pusher-js'
+
+const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+  cluster: 'eu',
+})
+
+function useChat(roomId: string) {
+  const [messages, setMessages] = useState<Message[]>([])
+
+  useEffect(() => {
+    const channel = pusher.subscribe(`chat-${roomId}`)
+    channel.bind('new-message', (data: Message) => {
+      setMessages((prev) => [...prev, data])
+    })
+    return () => channel.unsubscribe()
+  }, [roomId])
+
+  return messages
+}
+```
+
+Managed services work with any deployment target including Vercel Edge. The cost at scale is higher than self-managed, but the operational simplicity is significant.
+
+## Choosing the Right Approach
+
+- **Infrequent updates (30s+)**: polling
+- **Server-to-client only, self-managed server**: SSE
+- **Bidirectional, self-managed server, high control**: custom WebSocket server
+- **Bidirectional, Vercel deployment, simpler ops**: Pusher, Ably, or PartyKit
+
+---
+
+Real-time architecture is one of the decisions that has long-term consequences on your deployment infrastructure. If you're building a Next.js application that needs real-time features, [our team designs the architecture before writing a line of code](/contact).

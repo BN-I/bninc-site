@@ -1,0 +1,165 @@
+---
+title: Over-the-Air Updates with Expo EAS Update — When and How to Use Them
+description: A practical guide to Expo EAS Update — update channels, rollout strategies, when OTA is appropriate, and how to avoid the common mistakes that break production apps.
+date: 2026-02-26
+category: Cross-Platform Development
+keywords: [expo EAS update, over-the-air updates, OTA updates react native, expo update channels, expo update rollout]
+readingTime: 6
+coverImage: https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&q=80&auto=format&fit=crop
+---
+
+Over-the-air updates are one of the most operationally useful features in the React Native ecosystem. A bug fix that would take 2–7 days to pass App Store review can be live in minutes. Used correctly, OTA updates meaningfully reduce your incident response time. Used incorrectly, they can break users on specific build versions.
+
+Here's the mental model and operational procedure we use.
+
+## What OTA Can and Cannot Update
+
+OTA updates deliver a new JavaScript bundle to the device. That's all they change.
+
+**Can update via OTA:**
+- Any TypeScript/JavaScript code changes
+- React component changes
+- Style changes
+- Business logic fixes
+- Copy and content changes
+- Feature flags (JS-level)
+- Most React Navigation changes
+
+**Cannot update via OTA:**
+- New native modules (requires a new native build)
+- Changes to `app.json` native configuration
+- Expo SDK upgrades
+- New permissions
+- New native packages in `package.json`
+- Changes to native iOS/Android code
+
+The rule: if a change touches anything that triggers a new native build, it can't go via OTA.
+
+## Update Channels and Branches
+
+EAS Update uses channels and branches. A channel is a delivery target (like `production` or `staging`). A branch holds a sequence of published updates.
+
+```bash
+# Configure channels in eas.json
+```
+
+```json
+{
+  "build": {
+    "production": {
+      "channel": "production"
+    },
+    "preview": {
+      "channel": "preview"
+    }
+  }
+}
+```
+
+When you publish an update, it goes to a branch, and you point channels at branches:
+
+```bash
+# Publish an update to the production branch
+eas update --branch production --message "Fix booking confirmation crash"
+
+# Or point a channel to a specific branch
+eas channel:edit production --branch hotfix-march-12
+```
+
+This separation lets you test an update on `preview` before routing `production` traffic to it.
+
+## Rollout Strategy
+
+For high-traffic apps, don't ship OTA updates to 100% of users immediately. EAS Update supports rollout percentages:
+
+```bash
+# Roll out to 10% of production users first
+eas update --branch production --rollout-percentage 10 --message "Fix booking crash"
+
+# Monitor, then increase if stable
+eas update:rollout --branch production --update-id <id> --rollout-percentage 50
+eas update:rollout --branch production --update-id <id> --rollout-percentage 100
+```
+
+Watch your crash rate and API error rate for 15–30 minutes after each increment before continuing the rollout.
+
+## Runtime Version and Compatibility
+
+This is where most OTA issues originate. Every EAS build has a `runtimeVersion` — a fingerprint of the native layer. An OTA update can only be applied to builds with a matching runtime version.
+
+```json
+// app.json
+{
+  "expo": {
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
+  }
+}
+```
+
+With `appVersion` policy, the runtime version matches your `version` field. If you bump `version` for a new native build, old builds with the old version will not receive OTA updates targeting the new runtime version.
+
+Common mistake: bumping `version` for a minor fix that goes through OTA. If the fix is JS-only, publish an OTA update without bumping the version. Reserve version bumps for actual native changes and store submissions.
+
+## Embedding Updates at Build Time
+
+Configure your builds to embed the latest update at build time, so users get the current state even on first launch:
+
+```json
+// eas.json
+{
+  "build": {
+    "production": {
+      "channel": "production",
+      "updates": {
+        "checkAutomatically": "ON_LOAD"
+      }
+    }
+  }
+}
+```
+
+## Checking for Updates in Code
+
+For apps where instant updates are critical (a deployed bug fix, a time-sensitive content change), you can check for updates programmatically:
+
+```typescript
+import * as Updates from 'expo-updates'
+
+async function checkForUpdate() {
+  if (__DEV__) return // OTA doesn't apply in development
+
+  try {
+    const update = await Updates.checkForUpdateAsync()
+    if (update.isAvailable) {
+      await Updates.fetchUpdateAsync()
+      // Prompt user or reload immediately depending on context
+      await Updates.reloadAsync()
+    }
+  } catch (error) {
+    // Log but don't crash — OTA failure should never break the app
+    console.error('OTA check failed:', error)
+  }
+}
+```
+
+Don't call `reloadAsync()` without user consent in the middle of a user flow. Either show a prompt ("A new version is available — update now?") or queue the reload for the next app launch.
+
+## Rollback
+
+If a bad update goes out, roll back by pointing the channel to the previous update:
+
+```bash
+# List recent updates on the production branch
+eas update:list --branch production
+
+# Roll back to a specific update
+eas channel:edit production --update-id <previous-update-id>
+```
+
+Rollback takes effect on the next app launch for each user. For critical crashes that prevent launching, a native build with the old JS embedded is the only complete solution.
+
+---
+
+OTA updates have pulled us back from production incidents multiple times. The key is treating them as a serious deployment operation with the same care as a native release — staged rollout, monitoring, and a clear rollback procedure. If you want this workflow configured for your app, [our team sets it up as standard practice on every Expo project](/contact).

@@ -1,0 +1,245 @@
+---
+title: Sharing Code Between React Native and Next.js in a Monorepo
+description: How to set up a pnpm monorepo that shares business logic, types, API clients, and hooks between a React Native app and a Next.js web app without duplicating code.
+date: 2026-03-05
+category: Cross-Platform Development
+keywords: [react native nextjs monorepo, shared code react native web, pnpm workspaces, turborepo react native, cross-platform monorepo]
+readingTime: 9
+coverImage: https://images.unsplash.com/photo-1593720213428-28a5b9e94613?w=1200&q=80&auto=format&fit=crop
+---
+
+A product that has both a mobile app and a web application inevitably duplicates logic — API clients, TypeScript types, validation schemas, business rules, hooks. The duplication starts small and compounds over time: a fix applied to the mobile app needs manually porting to web, types diverge, schemas fall out of sync.
+
+A monorepo with shared packages solves this. Here's the structure we use for React Native + Next.js projects.
+
+## Repository Structure
+
+```
+apps/
+  mobile/           # React Native / Expo app
+  web/              # Next.js app
+packages/
+  api/              # API client (shared)
+  types/            # TypeScript types and Zod schemas (shared)
+  utils/            # Pure utility functions (shared)
+  ui-web/           # Web-only UI components
+  ui-native/        # Mobile-only UI components
+package.json        # Root workspace config
+pnpm-workspace.yaml
+turbo.json
+```
+
+The key principle: `packages/api`, `packages/types`, and `packages/utils` contain zero platform-specific code. They can be imported by both apps without any bundler configuration.
+
+## pnpm Workspace Setup
+
+Root `package.json`:
+
+```json
+{
+  "name": "yourapp-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.0.0"
+  }
+}
+```
+
+`pnpm-workspace.yaml`:
+
+```yaml
+packages:
+  - 'apps/*'
+  - 'packages/*'
+```
+
+## The Shared API Package
+
+The API package contains your API client, request/response types, and endpoint definitions. It uses only Node.js-compatible code — no `react-native` imports, no browser globals.
+
+```typescript
+// packages/api/src/client.ts
+import type { User, Booking, ApiResponse } from '@yourapp/types'
+
+const BASE_URL = process.env.API_BASE_URL ?? 'https://api.yourapp.com'
+
+async function request<T>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<ApiResponse<T>> {
+  const response = await fetch(`${BASE_URL}${endpoint}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+    ...options,
+  })
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await response.text())
+  }
+
+  return response.json()
+}
+
+export const api = {
+  users: {
+    get: (id: string) => request<User>(`/users/${id}`),
+    update: (id: string, data: Partial<User>) =>
+      request<User>(`/users/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+  },
+  bookings: {
+    list: () => request<Booking[]>('/bookings'),
+    create: (data: CreateBookingInput) =>
+      request<Booking>('/bookings', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+}
+```
+
+Both apps import this package:
+
+```typescript
+// apps/mobile/src/screens/BookingScreen.tsx
+import { api } from '@yourapp/api'
+
+// apps/web/app/bookings/page.tsx
+import { api } from '@yourapp/api'
+```
+
+## The Shared Types Package
+
+Use Zod schemas as the single source of truth — they generate TypeScript types and runtime validation simultaneously:
+
+```typescript
+// packages/types/src/booking.ts
+import { z } from 'zod'
+
+export const BookingSchema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+  serviceType: z.enum(['consultation', 'treatment', 'followup']),
+  startTime: z.string().datetime(),
+  status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']),
+})
+
+export type Booking = z.infer<typeof BookingSchema>
+
+export const CreateBookingSchema = BookingSchema.pick({
+  serviceType: true,
+  startTime: true,
+})
+
+export type CreateBookingInput = z.infer<typeof CreateBookingSchema>
+```
+
+Same schema validates form input on the web and API responses on mobile.
+
+## Shared Hooks
+
+Business logic hooks that don't touch UI can live in the shared `utils` package:
+
+```typescript
+// packages/utils/src/hooks/useBookings.ts
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '@yourapp/api'
+import type { CreateBookingInput } from '@yourapp/types'
+
+export function useBookings() {
+  return useQuery({
+    queryKey: ['bookings'],
+    queryFn: api.bookings.list,
+  })
+}
+
+export function useCreateBooking() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: CreateBookingInput) => api.bookings.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })
+    },
+  })
+}
+```
+
+Both apps use `useBookings()` with identical behaviour.
+
+## Turbo Configuration
+
+Turborepo handles build caching and task orchestration:
+
+```json
+// turbo.json
+{
+  "$schema": "https://turbo.build/schema.json",
+  "pipeline": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "dist/**", "build/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    }
+  }
+}
+```
+
+`"dependsOn": ["^build"]` ensures packages are built before the apps that consume them.
+
+## Metro Configuration for the Mobile App
+
+Metro (React Native's bundler) needs to be configured to understand the monorepo structure:
+
+```javascript
+// apps/mobile/metro.config.js
+const { getDefaultConfig } = require('expo/metro-config')
+const path = require('path')
+
+const projectRoot = __dirname
+const workspaceRoot = path.resolve(projectRoot, '../..')
+
+const config = getDefaultConfig(projectRoot)
+
+config.watchFolders = [workspaceRoot]
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, 'node_modules'),
+  path.resolve(workspaceRoot, 'node_modules'),
+]
+
+module.exports = config
+```
+
+Without this, Metro won't resolve imports from `packages/`.
+
+## What Stays Platform-Specific
+
+Not everything should be shared:
+
+- **UI components**: `<View>`, `<Text>`, `<FlatList>` vs `<div>`, `<p>`, `<ul>` — keep these in platform-specific packages
+- **Navigation**: React Navigation vs App Router — platform-specific
+- **Storage**: SecureStore/MMKV vs cookies/localStorage — platform-specific
+- **Platform permissions**: camera, location, notifications — mobile only
+
+The shared layer covers: types, validation, API clients, business logic hooks, pure utilities, constants, and formatting functions.
+
+---
+
+We've shipped several products on this architecture and the productivity gains from shared code compound significantly as the product grows. If you're starting a product that needs both mobile and web, [talk to our team about setting this up from day one](/contact).

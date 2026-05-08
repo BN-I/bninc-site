@@ -1,0 +1,189 @@
+---
+title: LLM Cost Optimization — Prompt Caching, Model Routing, and Semantic Caching
+description: Practical strategies to reduce LLM API costs in production — Anthropic prompt caching, model routing by complexity, semantic response caching, and token reduction techniques.
+date: 2025-12-11
+category: AI Integration & Agents
+keywords: [LLM cost optimization, prompt caching Anthropic, model routing LLM, semantic caching, reduce LLM costs, AI cost management]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1579621970588-a35d0e7ab9b6?w=1200&q=80&auto=format&fit=crop
+---
+
+LLM API costs are deceptive. A single request costs fractions of a cent. At 10,000 requests per day, the bill is noticeable. At 100,000 requests per day, it becomes a significant operating cost. The time to optimise is before you scale, not after — some cost reduction strategies require architectural decisions that are expensive to retrofit.
+
+Here are the techniques that produce the most significant savings.
+
+## Prompt Caching — 90% Reduction on System Prompts
+
+Both Anthropic and OpenAI support prompt caching. With Claude, cached tokens cost 90% less than uncached. For applications with long, static system prompts, this produces immediate and dramatic savings.
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk'
+
+const client = new Anthropic()
+
+// Example: a system prompt with extensive knowledge base content
+const knowledgeBase = fs.readFileSync('./knowledge-base.txt', 'utf-8') // ~10,000 tokens
+const systemPrompt = `You are a helpful customer support agent for Acme Corp.
+
+Here is your knowledge base:
+${knowledgeBase}
+
+Always be polite, accurate, and reference specific sections when answering questions.`
+
+const response = await client.messages.create({
+  model: 'claude-opus-4-7',
+  max_tokens: 1024,
+  system: [
+    {
+      type: 'text',
+      text: systemPrompt,
+      cache_control: { type: 'ephemeral' }, // Cache for 5 minutes
+    },
+  ],
+  messages: [{ role: 'user', content: userMessage }],
+})
+```
+
+The cache is per-account and per-model. Subsequent requests within the 5-minute window that have the same cached prefix pay 10% of the normal input token cost.
+
+For a system prompt of 10,000 tokens at Claude Sonnet pricing:
+- Uncached: $3.00 per 1,000 requests
+- Cached: $0.30 per 1,000 requests
+
+At 10,000 daily requests, that's $27/day saved on the system prompt alone.
+
+## Model Routing by Complexity
+
+Not every request requires a frontier model. A request that asks "what are your opening hours?" should not be processed by Claude Opus. A request that asks for a complex multi-step analysis should not be sent to Haiku.
+
+Build a request classifier that routes to the cheapest model capable of handling the request:
+
+```typescript
+const ModelTier = {
+  HAIKU: 'claude-haiku-4-5-20251001',  // Classification, simple Q&A
+  SONNET: 'claude-sonnet-4-6',          // Summarisation, extraction, standard chat
+  OPUS: 'claude-opus-4-7',              // Complex reasoning, multi-step tasks
+} as const
+
+async function classifyComplexity(query: string): Promise<keyof typeof ModelTier> {
+  // Use Haiku to classify (cheap), route the result to appropriate model
+  const classification = await client.messages.create({
+    model: ModelTier.HAIKU,
+    max_tokens: 10,
+    system: 'Classify query complexity. Reply with only: SIMPLE, MEDIUM, or COMPLEX.',
+    messages: [{ role: 'user', content: query }],
+  })
+
+  const label = (classification.content[0] as Anthropic.TextBlock).text.trim()
+  if (label === 'SIMPLE') return 'HAIKU'
+  if (label === 'COMPLEX') return 'OPUS'
+  return 'SONNET'
+}
+
+async function routedRequest(query: string, history: Message[]) {
+  const tier = await classifyComplexity(query)
+  return client.messages.create({
+    model: ModelTier[tier],
+    max_tokens: 1024,
+    messages: [...history, { role: 'user', content: query }],
+  })
+}
+```
+
+Classification with Haiku costs ~$0.0002 per call. If it routes even 40% of requests to Haiku instead of Sonnet, the cost reduction is significant.
+
+## Semantic Response Caching
+
+Exact response caching (cache by request hash) helps when the same query is sent repeatedly. Semantic caching goes further: cache responses and return them for semantically similar queries, even if the wording differs.
+
+"What are your business hours?" and "When are you open?" should return the same cached response.
+
+```typescript
+import { createClient } from 'redis'
+import Anthropic from '@anthropic-ai/sdk'
+
+const redis = createClient({ url: process.env.REDIS_URL })
+
+async function semanticallyCachedRequest(
+  query: string,
+  embedding: number[]
+): Promise<string> {
+  // Search for semantically similar cached response
+  // (Using Redis with vector search capability, e.g. Redis Stack)
+  const cached = await redis.ft.search('idx:cache', `*=>[KNN 1 @embedding $vec AS score]`, {
+    PARAMS: { vec: Buffer.from(new Float32Array(embedding).buffer) },
+    RETURN: ['response', 'score'],
+    DIALECT: 2,
+  })
+
+  const topResult = cached.documents[0]
+  const SIMILARITY_THRESHOLD = 0.92
+
+  if (topResult && Number(topResult.value.score) >= SIMILARITY_THRESHOLD) {
+    return topResult.value.response as string
+  }
+
+  // Cache miss — call the LLM
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 512,
+    messages: [{ role: 'user', content: query }],
+  })
+
+  const text = (response.content[0] as Anthropic.TextBlock).text
+
+  // Store in cache with embedding
+  await redis.hSet(`cache:${Date.now()}`, {
+    query,
+    response: text,
+    embedding: Buffer.from(new Float32Array(embedding).buffer),
+  })
+
+  return text
+}
+```
+
+For FAQ-heavy applications (customer support, documentation assistants), semantic caching can serve 40–60% of requests from cache.
+
+## Token Reduction
+
+Shorter prompts cost less. Some easy wins:
+
+**Remove filler from your system prompts.** Phrases like "You are a helpful, friendly, and knowledgeable assistant who always provides accurate information" add tokens that the model mostly ignores. "Answer accurately and concisely" is sufficient.
+
+**Use structured formats that compress well.** XML tags in prompts are 10–20% more token-efficient than prose instructions for structured output tasks.
+
+**Limit context window aggressively.** Only include the most recent N turns of conversation history, not the entire session. Most chatbot flows don't need more than 10–15 turns of history.
+
+**Request shorter responses explicitly.** "Reply in under 150 words" or "Give a 2–3 sentence answer" reduces output token costs. Output tokens are typically more expensive than input tokens.
+
+## Cost Monitoring
+
+Track cost per feature, not just total cost:
+
+```typescript
+async function trackedRequest(
+  feature: string,
+  params: Anthropic.MessageCreateParams
+) {
+  const response = await client.messages.create(params)
+
+  const usage = response.usage
+  await analytics.track('llm_request', {
+    feature,
+    model: params.model,
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cachedTokens: usage.cache_read_input_tokens ?? 0,
+    estimatedCost: calculateCost(params.model, usage),
+  })
+
+  return response
+}
+```
+
+Knowing that your "chat" feature costs $0.002/message and your "document analysis" feature costs $0.08/document changes where you invest optimisation effort.
+
+---
+
+LLM cost optimisation is an ongoing discipline, not a one-time configuration. If you're planning an AI product and want cost management built into the architecture from day one, [our team designs systems that scale economically](/contact).

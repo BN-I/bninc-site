@@ -1,0 +1,171 @@
+---
+title: Building Offline-First React Native Apps — Storage, Sync, and Conflict Resolution
+description: How to architect a React Native app that works without a network connection — local storage, background sync, optimistic updates, and conflict resolution strategies.
+date: 2026-04-16
+category: Mobile App Development
+keywords: [offline first react native, react native offline storage, MMKV, WatermelonDB, sync strategy, optimistic UI]
+readingTime: 9
+coverImage: https://images.unsplash.com/photo-1484807352052-23338990c6c6?w=1200&q=80&auto=format&fit=crop
+---
+
+Most mobile apps are built with the assumption of a network connection. This is a mistake. Mobile networks are unreliable — users go into tunnels, elevators, and rural areas. An app that becomes unusable without a connection feels broken even when the failure is the network's fault, not yours.
+
+Offline-first architecture means the app reads from and writes to local storage by default, and syncs with the server in the background. The user's operations never wait for a network round-trip.
+
+## Storage Options in React Native
+
+The right storage layer depends on your data model:
+
+| Layer | Best for | Options |
+|---|---|---|
+| Key-value | Settings, tokens, small state | MMKV, AsyncStorage |
+| Relational | Structured app data with queries | WatermelonDB, SQLite (op-sqlite) |
+| File | Binary data, images, documents | Expo FileSystem, RNFS |
+
+**MMKV** is the correct choice for key-value storage. It's a C++ implementation that's 30× faster than AsyncStorage and synchronous. Use it for user preferences, auth tokens, cached API responses, and anything you want to read synchronously.
+
+```typescript
+import { MMKV } from 'react-native-mmkv'
+
+export const storage = new MMKV()
+
+// Synchronous read — no await needed
+const token = storage.getString('auth_token')
+const userPrefs = JSON.parse(storage.getString('user_prefs') ?? '{}')
+```
+
+**WatermelonDB** is the correct choice for relational data. It's built for React Native with lazy loading and reactive queries, and its sync protocol is designed specifically for offline-first use cases.
+
+## The Sync Architecture
+
+The core pattern: every write goes to local storage first, then a sync queue processes the writes to the server in the background.
+
+```
+User action
+  → Write to local DB immediately (optimistic)
+  → Render from local DB (instant feedback)
+  → Sync queue picks up pending changes
+  → Server accepts or rejects each change
+  → Apply server response to local DB
+```
+
+This pattern means the user's interaction is never blocked. The async sync can retry on network recovery.
+
+### Implementing a Sync Queue
+
+```typescript
+interface SyncOperation {
+  id: string
+  type: 'CREATE' | 'UPDATE' | 'DELETE'
+  table: string
+  recordId: string
+  payload: Record<string, unknown>
+  createdAt: number
+  retryCount: number
+}
+
+class SyncQueue {
+  private queue: SyncOperation[] = []
+
+  async enqueue(op: SyncOperation) {
+    this.queue.push(op)
+    storage.set('sync_queue', JSON.stringify(this.queue))
+    await this.flush()
+  }
+
+  async flush() {
+    if (!navigator.onLine) return
+
+    const pending = [...this.queue]
+    for (const op of pending) {
+      try {
+        await this.process(op)
+        this.queue = this.queue.filter((q) => q.id !== op.id)
+      } catch (error) {
+        op.retryCount++
+        if (op.retryCount >= 5) this.queue = this.queue.filter((q) => q.id !== op.id)
+      }
+    }
+
+    storage.set('sync_queue', JSON.stringify(this.queue))
+  }
+
+  private async process(op: SyncOperation) {
+    const endpoint = `/api/${op.table}/${op.recordId}`
+    const method = op.type === 'CREATE' ? 'POST' : op.type === 'UPDATE' ? 'PATCH' : 'DELETE'
+    const response = await fetch(endpoint, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: op.type !== 'DELETE' ? JSON.stringify(op.payload) : undefined,
+    })
+    if (!response.ok) throw new Error(`Server rejected: ${response.status}`)
+  }
+}
+```
+
+Listen to network state changes to trigger sync on reconnection:
+
+```typescript
+import NetInfo from '@react-native-community/netinfo'
+
+useEffect(() => {
+  const unsubscribe = NetInfo.addEventListener((state) => {
+    if (state.isConnected) {
+      syncQueue.flush()
+    }
+  })
+  return unsubscribe
+}, [])
+```
+
+## Optimistic Updates with React Query
+
+React Query (TanStack Query) has first-class support for optimistic updates — update the UI immediately and roll back if the server rejects the change:
+
+```typescript
+const { mutate: updateTask } = useMutation({
+  mutationFn: (data: TaskUpdate) => api.updateTask(data),
+  onMutate: async (newData) => {
+    await queryClient.cancelQueries({ queryKey: ['tasks'] })
+    const previous = queryClient.getQueryData(['tasks'])
+
+    // Optimistically update the cache
+    queryClient.setQueryData(['tasks'], (old: Task[]) =>
+      old.map((t) => (t.id === newData.id ? { ...t, ...newData } : t))
+    )
+
+    return { previous }
+  },
+  onError: (_err, _vars, context) => {
+    // Roll back on failure
+    queryClient.setQueryData(['tasks'], context?.previous)
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+  },
+})
+```
+
+## Conflict Resolution
+
+When a user edits data offline and someone else edits the same record online, you have a conflict. The three common strategies:
+
+**Last-write wins**: The most recent timestamp wins. Simple to implement, loses data when two users edit simultaneously. Acceptable for most user-scoped data (settings, personal records).
+
+**Field-level merge**: Track which fields changed and merge non-conflicting changes. Two users editing different fields of the same record both win. More complex to implement but appropriate for collaborative data.
+
+**Version vectors**: Each record has a version counter. The server rejects updates with an outdated version and returns the current state. The client presents a conflict resolution UI. Use this for high-value data where data loss is unacceptable.
+
+For most consumer apps, last-write wins with a `updatedAt` timestamp is the right call. Build for the 99% case.
+
+## Testing Offline Behaviour
+
+Test offline scenarios explicitly — don't assume they work because the online path works:
+
+- Disable wifi in the iOS Simulator via Device → Network Link Conditioner
+- Use the React Native debugger's network throttling
+- Write explicit tests with `jest.mock('react-native-netinfo')`
+
+---
+
+Offline-first is not an afterthought to add before launch — it's an architectural decision that affects your data layer, sync strategy, and UI patterns from the start. If you're planning a mobile app and want offline-first built in from day one, [talk to our team](/contact).

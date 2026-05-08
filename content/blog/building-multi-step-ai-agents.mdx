@@ -1,0 +1,251 @@
+---
+title: Building Multi-Step AI Agents — Workflows, Tools, and State Management
+description: How to architect multi-step AI agents that reliably complete complex tasks — the agent loop, tool orchestration, state management, error recovery, and human-in-the-loop checkpoints.
+date: 2025-12-04
+category: AI Integration & Agents
+keywords: [AI agents, multi-step agent, LLM agent architecture, agentic AI, Claude agent, AI workflow automation, tool orchestration]
+readingTime: 9
+coverImage: https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=1200&q=80&auto=format&fit=crop
+---
+
+An AI agent is a system that uses an LLM to make decisions and take actions in a loop, working toward a goal over multiple steps. The agent decides what to do next, executes it, observes the result, and continues until the goal is reached or it gives up.
+
+Agents are more capable than single-turn chatbots but significantly harder to make reliable. Here's the architecture that makes them production-worthy.
+
+## The Agent Loop
+
+Every agent runs the same basic loop:
+
+```
+Goal → Plan → Act → Observe → Update State → Plan → Act → ...
+```
+
+In code:
+
+```typescript
+interface AgentState {
+  goal: string
+  messages: Anthropic.MessageParam[]
+  toolResults: Record<string, unknown>
+  stepCount: number
+  status: 'running' | 'complete' | 'failed' | 'needs_human'
+}
+
+const MAX_STEPS = 20
+
+async function runAgent(goal: string): Promise<AgentState> {
+  let state: AgentState = {
+    goal,
+    messages: [{ role: 'user', content: goal }],
+    toolResults: {},
+    stepCount: 0,
+    status: 'running',
+  }
+
+  while (state.status === 'running' && state.stepCount < MAX_STEPS) {
+    state = await agentStep(state)
+  }
+
+  if (state.stepCount >= MAX_STEPS) {
+    state.status = 'failed'
+  }
+
+  return state
+}
+```
+
+The step limit is non-negotiable. Without it, a stuck agent loops forever. 20 steps is sufficient for most workflows; complex research tasks might need 50.
+
+## Defining Agent Tools
+
+Tools for agents differ from chatbot tools in scope — they're designed for multi-step operations:
+
+```typescript
+const agentTools: Anthropic.Tool[] = [
+  {
+    name: 'search_web',
+    description: 'Search the web for current information. Returns top 5 results with titles and snippets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+        date_range: {
+          type: 'string',
+          enum: ['day', 'week', 'month', 'year', 'all'],
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'read_url',
+    description: 'Read and extract the full text content of a URL. Use after search_web to get full article content.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'write_file',
+    description: 'Write content to a named file. Use for drafts, reports, or structured outputs.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string' },
+        content: { type: 'string' },
+      },
+      required: ['filename', 'content'],
+    },
+  },
+  {
+    name: 'task_complete',
+    description: 'Signal that the goal has been achieved. Provide a summary of what was accomplished.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string' },
+        output: { type: 'string' },
+      },
+      required: ['summary'],
+    },
+  },
+]
+```
+
+`task_complete` is a termination signal. Without a clear way for the agent to signal completion, it may continue running past the goal.
+
+## The Agent Step Function
+
+```typescript
+async function agentStep(state: AgentState): Promise<AgentState> {
+  const response = await client.messages.create({
+    model: 'claude-opus-4-7',
+    max_tokens: 2048,
+    system: `You are an autonomous agent working toward a goal. 
+Work step by step. After each tool call, evaluate progress toward the goal. 
+Call task_complete when the goal is fully achieved.`,
+    tools: agentTools,
+    messages: state.messages,
+  })
+
+  const newMessages: Anthropic.MessageParam[] = [
+    ...state.messages,
+    { role: 'assistant', content: response.content },
+  ]
+
+  // Agent is done
+  if (response.stop_reason === 'end_turn') {
+    return { ...state, messages: newMessages, status: 'complete' }
+  }
+
+  // Process tool calls
+  const toolResults: Anthropic.ToolResultBlockParam[] = []
+
+  for (const block of response.content) {
+    if (block.type !== 'tool_use') continue
+
+    // Check for human-in-the-loop triggers
+    if (shouldRequireHumanApproval(block.name, block.input)) {
+      return {
+        ...state,
+        messages: newMessages,
+        status: 'needs_human',
+        pendingTool: block,
+      } as AgentState
+    }
+
+    const result = await executeTool(block.name, block.input)
+
+    // task_complete terminates the loop
+    if (block.name === 'task_complete') {
+      toolResults.push({
+        type: 'tool_result',
+        tool_use_id: block.id,
+        content: 'Task marked complete.',
+      })
+      const finalMessages = [
+        ...newMessages,
+        { role: 'user', content: toolResults },
+      ] as Anthropic.MessageParam[]
+      return { ...state, messages: finalMessages, status: 'complete' }
+    }
+
+    toolResults.push({
+      type: 'tool_result',
+      tool_use_id: block.id,
+      content: JSON.stringify(result),
+    })
+  }
+
+  return {
+    ...state,
+    messages: [
+      ...newMessages,
+      { role: 'user', content: toolResults },
+    ] as Anthropic.MessageParam[],
+    stepCount: state.stepCount + 1,
+  }
+}
+```
+
+## Human-in-the-Loop Checkpoints
+
+For actions that are expensive, irreversible, or high-risk, pause and request human approval:
+
+```typescript
+function shouldRequireHumanApproval(
+  toolName: string,
+  input: Record<string, unknown>
+): boolean {
+  const HIGH_RISK_TOOLS = ['send_email', 'delete_records', 'make_payment', 'publish_content']
+  return HIGH_RISK_TOOLS.includes(toolName)
+}
+```
+
+When `status === 'needs_human'`, store the agent state, notify the user, and resume when they approve or reject. This prevents agents from taking consequential actions without oversight.
+
+## Parallel Tool Execution
+
+Claude can request multiple tools in a single response. Execute independent tool calls in parallel:
+
+```typescript
+const toolResults = await Promise.all(
+  response.content
+    .filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
+    .map(async (block) => {
+      const result = await executeTool(block.name, block.input)
+      return {
+        type: 'tool_result' as const,
+        tool_use_id: block.id,
+        content: JSON.stringify(result),
+      }
+    })
+)
+```
+
+This reduces total agent runtime significantly when the model requests multiple independent lookups in one step.
+
+## Observability
+
+Agent runs without observability are impossible to debug. Log every step:
+
+```typescript
+await observability.logAgentStep({
+  runId: state.runId,
+  stepNumber: state.stepCount,
+  toolCalled: toolName,
+  toolInput: input,
+  toolOutput: result,
+  latencyMs: Date.now() - stepStart,
+  tokensUsed: response.usage,
+})
+```
+
+LangSmith, Langfuse, and Arize Phoenix all provide agent tracing. Pick one and instrument before going to production.
+
+---
+
+Multi-step agents are one of the most powerful tools in modern software, and one of the hardest to make reliable. The architecture decisions — step limits, human checkpoints, error handling, observability — determine whether they work in production. If you're building an agentic AI product, [our team designs and ships it with production reliability in mind](/contact).

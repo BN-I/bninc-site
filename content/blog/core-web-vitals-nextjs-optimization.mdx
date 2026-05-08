@@ -1,0 +1,199 @@
+---
+title: Optimizing Core Web Vitals in Next.js — LCP, CLS, and INP
+description: A systematic approach to improving Core Web Vitals in Next.js — fixing Largest Contentful Paint, eliminating Cumulative Layout Shift, and reducing Interaction to Next Paint.
+date: 2026-01-15
+category: Web Application Development
+keywords: [core web vitals nextjs, LCP optimization, CLS fix, INP nextjs, next.js performance, web vitals improvement]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1200&q=80&auto=format&fit=crop
+---
+
+Core Web Vitals are Google's user-experience metrics and a direct ranking factor in search. Poor scores affect both user experience and organic search performance. The good news: Next.js provides most of the infrastructure needed to score well — you mostly need to use it correctly and avoid a handful of common mistakes.
+
+## LCP — Largest Contentful Paint
+
+LCP measures how long the largest visible element takes to render. For most marketing pages, this is the hero image. The target: under 2.5 seconds.
+
+### Priority Images
+
+The most impactful fix for LCP is adding `priority` to your above-the-fold hero image:
+
+```tsx
+import Image from 'next/image'
+
+// Without priority — browser discovers image late, LCP suffers
+<Image src="/hero.jpg" alt="Hero" width={1200} height={600} />
+
+// With priority — preloaded in <head>, LCP typically improves 500ms–1.5s
+<Image src="/hero.jpg" alt="Hero" width={1200} height={600} priority />
+```
+
+`priority` adds a `<link rel="preload">` tag to the document head, telling the browser to fetch the image before it processes the rest of the HTML. Apply it to any image that is the likely LCP element on the page.
+
+### Proper Image Sizing
+
+Next.js `<Image>` generates a `srcset` with multiple sizes. Configure `sizes` to tell the browser how large the image will be at each viewport:
+
+```tsx
+<Image
+  src="/hero.jpg"
+  alt="Hero"
+  fill
+  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 1200px"
+  priority
+/>
+```
+
+Without `sizes`, the browser downloads the full-resolution image even on mobile viewports. This alone can cost 500ms+ on mobile connections.
+
+### Font Loading
+
+System fonts display immediately. Google Fonts or custom fonts that aren't preloaded produce a Flash of Invisible Text (FOIT) that delays LCP when the LCP element contains text.
+
+Next.js handles this automatically with `next/font`:
+
+```typescript
+import { Inter } from 'next/font/google'
+
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap', // Shows fallback font immediately, swaps when ready
+  preload: true,
+})
+```
+
+The `display: 'swap'` value ensures text is visible immediately with a system font fallback, preventing LCP delay.
+
+## CLS — Cumulative Layout Shift
+
+CLS measures unexpected layout movement. The target: under 0.1. Most CLS comes from a small number of known causes.
+
+### Images Without Dimensions
+
+Images without explicit width/height cause layout shift when they load — the browser doesn't know how much space to reserve:
+
+```tsx
+// Causes CLS — browser doesn't know height until image loads
+<img src="/product.jpg" />
+
+// No CLS — browser reserves correct space
+<Image src="/product.jpg" width={400} height={300} alt="Product" />
+// Or for fill images:
+<div style={{ position: 'relative', height: '300px' }}>
+  <Image src="/product.jpg" fill alt="Product" />
+</div>
+```
+
+### Dynamic Content Injection
+
+Content that loads after initial render and pushes down other content causes CLS:
+
+```tsx
+// Bad — banner appears and pushes content down
+function Page() {
+  const [showBanner, setShowBanner] = useState(false)
+  useEffect(() => { setShowBanner(shouldShowBanner()) }, [])
+
+  return (
+    <>
+      {showBanner && <PromoBanner />}  {/* Causes layout shift */}
+      <MainContent />
+    </>
+  )
+}
+
+// Good — reserve space for the banner
+function Page() {
+  const [showBanner, setShowBanner] = useState(false)
+  useEffect(() => { setShowBanner(shouldShowBanner()) }, [])
+
+  return (
+    <>
+      <div style={{ minHeight: showBanner ? 'auto' : '0px' }}>
+        {showBanner && <PromoBanner />}
+      </div>
+      <MainContent />
+    </>
+  )
+}
+```
+
+### Fonts Without `size-adjust`
+
+When a web font loads and replaces the fallback, the character spacing changes and causes text reflow. Next.js `next/font` handles this with automatic `size-adjust` and `ascent-override` values that make the fallback font visually match the web font before it loads.
+
+## INP — Interaction to Next Paint
+
+INP replaced FID in March 2024. It measures the latency from user interaction to the next visual update. The target: under 200ms. Poor INP means your app feels sluggish to interact with.
+
+### Long Tasks Block the Main Thread
+
+Any JavaScript that runs for more than 50ms is a "long task" that blocks user interaction. Identify them with Chrome DevTools' Performance tab → Main thread:
+
+Common causes:
+- Large component trees re-rendering on user interaction
+- Expensive computations in event handlers
+- Synchronous data processing (sorting/filtering large arrays without optimisation)
+
+Fix with `startTransition` for non-urgent state updates:
+
+```typescript
+import { startTransition } from 'react'
+
+function FilterableList() {
+  const [filter, setFilter] = useState('')
+  const [filtered, setFiltered] = useState(data)
+
+  function handleFilterChange(value: string) {
+    setFilter(value) // Urgent — update input immediately
+
+    startTransition(() => {
+      setFiltered(data.filter((item) =>
+        item.name.toLowerCase().includes(value.toLowerCase())
+      ))
+    })
+  }
+}
+```
+
+### Avoid Hydration Mismatches
+
+Hydration mismatches cause React to re-render the entire component tree after initial paint, contributing to poor INP on first interaction.
+
+Common source: `Math.random()`, `Date.now()`, or anything from `localStorage` rendered server-side. Use `useEffect` for client-only values:
+
+```typescript
+// Bad — mismatch between server and client renders
+const id = useMemo(() => Math.random().toString(), [])
+
+// Good — only rendered on client
+const [id, setId] = useState('')
+useEffect(() => { setId(Math.random().toString()) }, [])
+```
+
+## Measuring in Production
+
+Use Next.js's built-in Web Vitals reporting:
+
+```typescript
+// app/components/WebVitals.tsx
+'use client'
+import { useReportWebVitals } from 'next/web-vitals'
+
+export function WebVitals() {
+  useReportWebVitals((metric) => {
+    analytics.track('web_vital', {
+      name: metric.name,
+      value: metric.value,
+      rating: metric.rating, // 'good', 'needs-improvement', 'poor'
+    })
+  })
+  return null
+}
+```
+
+Lab scores (Lighthouse) and field scores (Chrome UX Report) can differ significantly. Always measure with real user data.
+
+---
+
+Core Web Vitals improvements compound: better scores mean better rankings, more organic traffic, and better user experience. If you're building a Next.js application and want performance built in from the start, [our team handles this as part of every web project](/contact).

@@ -1,0 +1,171 @@
+---
+title: Next.js Middleware — Authentication, Redirects, and Edge Logic
+description: How to use Next.js Middleware for authentication guards, geo-based redirects, A/B testing, and request modification — with the constraints and gotchas of the Edge Runtime.
+date: 2026-02-12
+category: Web Application Development
+keywords: [nextjs middleware, nextjs authentication, edge middleware, nextjs redirects, nextjs edge runtime, middleware auth guard]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&q=80&auto=format&fit=crop
+---
+
+Next.js Middleware runs before a request reaches your route handlers, at the CDN edge — before the response is served from cache, before any server component renders. This positioning makes it uniquely powerful for certain problems and entirely wrong for others.
+
+Understanding where middleware sits in the request lifecycle is the prerequisite for using it correctly.
+
+## Request Lifecycle Position
+
+```
+Client Request
+  → CDN Edge (Middleware runs here)
+    → If request is modified/redirected: return early
+    → Otherwise: continue to cache lookup
+      → Cache hit: return cached response
+      → Cache miss: hit origin server
+        → Server Components / Route Handlers
+```
+
+Middleware runs at the edge, before the origin. This means it runs close to the user globally (low latency) but in a constrained environment: no Node.js APIs, no native modules, no database connections, limited compute time.
+
+## Authentication in Middleware
+
+The most common use case: protect routes so unauthenticated users are redirected to login.
+
+```typescript
+// middleware.ts
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+
+const PROTECTED_PATHS = ['/dashboard', '/account', '/admin']
+const AUTH_COOKIE = 'session_token'
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // Check if this path requires auth
+  const isProtected = PROTECTED_PATHS.some((path) =>
+    pathname.startsWith(path)
+  )
+
+  if (!isProtected) return NextResponse.next()
+
+  const sessionToken = request.cookies.get(AUTH_COOKIE)?.value
+
+  if (!sessionToken) {
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('callbackUrl', pathname)
+    return NextResponse.redirect(loginUrl)
+  }
+
+  // Optionally validate the token (JWT verification is fine in Edge Runtime)
+  // Don't make database calls here — use short-lived JWTs to avoid this
+  return NextResponse.next()
+}
+
+export const config = {
+  // Only run middleware on these paths
+  matcher: ['/dashboard/:path*', '/account/:path*', '/admin/:path*'],
+}
+```
+
+**Critical constraint**: Middleware cannot make database calls to validate sessions. The Edge Runtime has no database drivers. The correct pattern is to use short-lived JWTs — validate the JWT signature in middleware (Edge Runtime supports Web Crypto), don't call your database.
+
+If you need database-backed session validation, use it in your server components or route handlers, not in middleware.
+
+## JWT Validation at the Edge
+
+```typescript
+import { jwtVerify } from 'jose'
+
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET)
+
+export async function middleware(request: NextRequest) {
+  const token = request.cookies.get('session')?.value
+
+  if (!token) {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET)
+
+    // Pass user data to server components via request headers
+    const response = NextResponse.next()
+    response.headers.set('x-user-id', payload.sub as string)
+    response.headers.set('x-user-role', payload.role as string)
+    return response
+  } catch {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+}
+```
+
+The `jose` library works in the Edge Runtime (it uses Web Crypto, not Node's `crypto`). The standard `jsonwebtoken` library does not.
+
+## Geo-Based Redirects
+
+```typescript
+export function middleware(request: NextRequest) {
+  const country = request.geo?.country ?? 'US'
+
+  // Redirect EU users to EU domain for GDPR compliance
+  if (['DE', 'FR', 'NL', 'SE', 'IT', 'ES'].includes(country)) {
+    const euUrl = new URL(request.url)
+    euUrl.hostname = 'eu.yourapp.com'
+    return NextResponse.redirect(euUrl)
+  }
+
+  return NextResponse.next()
+}
+```
+
+`request.geo` is populated by Vercel's edge network. On self-hosted deployments, you'll need to handle geo resolution differently.
+
+## A/B Testing
+
+Assign users to test variants consistently using a cookie:
+
+```typescript
+export function middleware(request: NextRequest) {
+  const response = NextResponse.next()
+
+  // Assign variant if not already assigned
+  let variant = request.cookies.get('ab_variant')?.value
+  if (!variant) {
+    variant = Math.random() < 0.5 ? 'control' : 'treatment'
+    response.cookies.set('ab_variant', variant, { maxAge: 60 * 60 * 24 * 30 })
+  }
+
+  // Rewrite to variant-specific page
+  if (request.nextUrl.pathname === '/' && variant === 'treatment') {
+    return NextResponse.rewrite(new URL('/home-v2', request.url))
+  }
+
+  return response
+}
+```
+
+## The Matcher — Use It
+
+Always define a `matcher` config. Without it, middleware runs on every request, including `/_next/static/`, API routes, and image optimisation routes. This adds latency to static asset delivery for no reason.
+
+```typescript
+export const config = {
+  matcher: [
+    // Match all routes except static files and API routes
+    '/((?!_next/static|_next/image|favicon.ico|api).*)',
+  ],
+}
+```
+
+## What Middleware Is Wrong For
+
+- **Heavy computation**: Middleware has tight CPU time limits (10ms on Vercel Hobby, more on Pro)
+- **Database reads**: No database drivers in Edge Runtime
+- **File system access**: Edge Runtime has no file system
+- **Complex authentication logic**: JWT validation yes; session DB lookup no
+
+For database-backed auth, the pattern is: middleware validates the JWT, passes the user ID as a header, and your server components read the header and call the database if needed.
+
+---
+
+Middleware is one of the most powerful Next.js primitives when used for the right problems. If you're building a Next.js application and need authentication, multi-region routing, or request-time feature gating, [our team builds this as a standard part of web projects](/contact).

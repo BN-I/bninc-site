@@ -1,0 +1,63 @@
+---
+title: How Cross-Platform Development Cuts Your App Budget by 40% Without Sacrificing Quality
+description: A practical breakdown of where cross-platform development saves money, where it doesn't, and how to decide if it's right for your project.
+date: 2025-04-08
+category: Cross-Platform Development
+keywords: [cross-platform app development, expo react native, react native web, app development cost, iOS android app, single codebase]
+readingTime: 6
+---
+
+The single question every founder asks before starting a mobile project: should we build native or cross-platform? The budget answer is clear — cross-platform costs significantly less. But the nuanced answer depends on what you're building and how fast you need to move.
+
+## Where the Savings Come From
+
+The cost difference isn't marketing. It's mathematics:
+
+**One codebase, one team.** A native project requires two separate engineers (or teams) with iOS and Android expertise. A React Native project needs one team that ships to both. You immediately halve the headcount requirement for the same feature set.
+
+**Shared business logic.** API clients, data models, authentication flows, form validation, analytics — none of this is platform-specific. In a cross-platform project, you write it once. In a native project, you write it twice and keep it in sync indefinitely.
+
+**One release cycle.** Coordinating simultaneous iOS and Android releases is a project management overhead that compounds over time. One codebase means one PR, one review, one merge, one deployment.
+
+Across a typical 12-week MVP, this translates to roughly 30–40% fewer engineering hours for the same feature surface area.
+
+## Where Cross-Platform Falls Short
+
+There are legitimate reasons to go fully native:
+
+- **Deep platform APIs**: Advanced Bluetooth peripherals, custom camera pipelines, AR with ARKit/ARCore — these require native modules that add complexity and can erode the cost advantage
+- **Highly customised animations**: If your app's core value is novel animation and gesture design at 120fps, native gives you more direct control
+- **Platform-specific UX patterns**: Apps that need to feel deeply iOS-native (complex SwiftUI transitions, Live Activities) or Android-native (widgets, adaptive icons with custom behaviour) hit the limits of cross-platform abstractions
+
+For the vast majority of apps — B2B tools, marketplaces, content platforms, utilities, and social products — React Native with the new architecture is the correct choice.
+
+## The Expo Advantage
+
+Expo's managed workflow and EAS tooling have transformed the cross-platform development experience:
+
+**EAS Build** handles native compilation in the cloud. Your team doesn't need Mac hardware to build iOS. Automated builds run on every PR.
+
+**EAS Update** (OTA) lets you push JavaScript changes directly to users without App Store review. Bug fixes and copy changes can be live in minutes, not days.
+
+**Expo Router** brings file-based routing to React Native, consistent with how Next.js works on the web. Teams familiar with web development learn it in hours.
+
+## Extending to the Web
+
+React Native Web allows the same codebase to render in a browser. This isn't the right choice for every product — a native mobile app and a web dashboard have fundamentally different UX requirements — but for internal tools, admin panels, and tablet-targeted experiences, sharing 60–80% of code between mobile and web is entirely realistic.
+
+We've shipped multiple products at BNinc where the mobile and web versions share the entire data layer, navigation logic, and component library, with only layout-level components diverging.
+
+## The Decision Framework
+
+Start with cross-platform if:
+- You're building an MVP or validating a new product
+- Your app's core functionality is data-heavy (forms, lists, dashboards, maps)
+- You need both iOS and Android from day one
+- Budget and speed-to-market are primary constraints
+
+Consider native if:
+- Your app requires deep integration with platform-specific hardware
+- You're building for a single platform only and want maximum platform expressiveness
+- You have a team already skilled in Swift or Kotlin
+
+If you're unsure, a 30-minute conversation usually resolves it. [Book one with us](/contact) — we'll give you a straight answer.

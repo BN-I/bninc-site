@@ -1,0 +1,127 @@
+---
+title: Integrating LLMs Into Production Products — A Practical Engineering Guide
+description: How to embed GPT-4, Claude, and open-source models into your product reliably, cost-effectively, and safely. RAG, prompt caching, evaluation, and guardrails.
+date: 2025-04-29
+category: AI Integration & Agents
+keywords: [LLM integration, GPT-4 integration, Claude API, RAG pipeline, AI product development, prompt engineering, production AI]
+readingTime: 10
+---
+
+The gap between "we added an LLM API call" and "we shipped a reliable AI feature" is wider than most teams expect. LLMs are probabilistic systems embedded in deterministic software — the engineering discipline required to make them production-ready is different from conventional API integration, and the mistakes are expensive.
+
+This is the approach we use when integrating AI into client products.
+
+## Choose the Right Model for Each Task
+
+The instinct is to use the most capable model available. The correct approach is to use the cheapest model that reliably solves your specific task.
+
+A rough model selection framework:
+
+| Task | Appropriate model tier |
+|------|----------------------|
+| Text classification, intent detection | Small model (GPT-4o Mini, Claude Haiku) |
+| Summarisation, extraction | Mid-tier (Claude Sonnet, GPT-4o) |
+| Complex reasoning, code generation | Frontier model (Claude Opus, GPT-4o) |
+| Structured data extraction | Any model with JSON mode |
+
+Running every request through a frontier model when a smaller model would suffice adds 10–50× unnecessary cost at scale.
+
+## Retrieval-Augmented Generation (RAG)
+
+LLMs have a training cutoff and don't know your proprietary data. RAG solves this by retrieving relevant context from a vector database at query time and injecting it into the prompt.
+
+A production RAG pipeline:
+
+```
+User query
+  → Embed query (text-embedding-3-small or similar)
+  → Vector similarity search in Pinecone/pgvector
+  → Retrieve top-k chunks
+  → Inject chunks into system prompt as context
+  → LLM generates grounded response
+```
+
+Critical details that are often skipped:
+
+**Chunking strategy matters more than embedding model.** Poorly chunked documents produce irrelevant retrievals that no embedding model can fix. Use semantic chunking — split at meaningful boundaries, not fixed token counts.
+
+**Hybrid search outperforms pure vector search.** Combine dense vector search (semantic similarity) with sparse BM25 search (keyword matching) for significantly better retrieval accuracy. Most production systems that use pure vector search are leaving recall on the table.
+
+**Reranking improves precision.** A cross-encoder reranker (Cohere Rerank, ColBERT) applied to the top-20 vector search results before trimming to top-5 produces meaningfully better context for the LLM.
+
+## Prompt Caching
+
+At scale, the cost of prompt tokens — particularly long system prompts — dominates your LLM spend. Both Anthropic and OpenAI support prompt caching that dramatically reduces this cost.
+
+With Anthropic's Claude:
+
+```typescript
+const response = await anthropic.messages.create({
+  model: "claude-opus-4-6",
+  system: [
+    {
+      type: "text",
+      text: longSystemPrompt,
+      cache_control: { type: "ephemeral" }, // Cache for 5 minutes
+    },
+  ],
+  messages: [{ role: "user", content: userMessage }],
+})
+```
+
+Cached prompt tokens cost 90% less than uncached tokens. For applications where the system prompt is static across many requests, this produces a 60–80% reduction in total token cost.
+
+## Structured Output
+
+Parsing free-text LLM responses is fragile. Use structured output wherever you need machine-readable data:
+
+```typescript
+const schema = z.object({
+  intent: z.enum(["booking", "cancellation", "inquiry", "escalate"]),
+  confidence: z.number().min(0).max(1),
+  extractedData: z.object({
+    date: z.string().optional(),
+    service: z.string().optional(),
+  }),
+})
+
+// Use OpenAI's structured output or Anthropic's tool use to guarantee schema compliance
+```
+
+Both GPT-4o and Claude reliably produce schema-compliant JSON when you enforce it at the API level. Never rely on prompt instructions alone to guarantee structure.
+
+## Evaluation Pipeline
+
+You cannot improve what you don't measure. Build an evaluation pipeline before you ship to production.
+
+A minimum viable eval setup:
+1. **Golden dataset**: 50–200 representative inputs with expected outputs, curated by your team
+2. **Automated scoring**: Use an LLM-as-judge to score responses on accuracy, helpfulness, and adherence to instructions
+3. **Regression tracking**: Run evals on every model or prompt change to detect regressions before deployment
+
+`promptfoo` is the best open-source tool for this. It integrates with CI and produces diff views when you change prompts.
+
+## Guardrails and Safety
+
+Production AI systems need defensive layers:
+
+**Input validation**: Detect and reject prompt injection attempts, jailbreaks, and off-topic requests before they reach the model. A small classifier (even keyword-based) catches most obvious attacks.
+
+**Output validation**: Validate that the model's response matches the expected structure and doesn't contain flagged content. The [Guardrails AI](https://github.com/guardrails-ai/guardrails) library provides validators for common cases.
+
+**Rate limiting**: Per-user rate limits prevent abuse and make cost anomalies detectable before they become expensive. Track token consumption per user, not just request count.
+
+**Audit logging**: Store inputs, outputs, and model parameters for every request. You will need this for debugging, compliance, and improving the system over time.
+
+## Cost Management
+
+LLM costs can surprise you at scale. Controls that work:
+
+- **Model routing**: Classify request complexity at low cost, route simple requests to cheaper models
+- **Caching**: Cache common queries and their responses (semantic cache with a similarity threshold)
+- **Streaming with early termination**: For user-facing generation, stream output and let users cancel long responses
+- **Budget alerts**: Set per-day spend alerts at the provider level before you have users, not after
+
+---
+
+If you're planning an AI integration and want to get the architecture right from the start, [our team does this on a regular basis](/contact). We can scope the work, identify the right model tier, and design the evaluation strategy before you write a line of code.

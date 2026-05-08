@@ -1,0 +1,97 @@
+---
+title: Fine-Tuning vs RAG — Choosing the Right Approach for Your LLM Product
+description: A direct comparison of fine-tuning and retrieval-augmented generation — when each approach is appropriate, the real costs, and the implementation trade-offs.
+date: 2025-12-25
+category: AI Integration & Agents
+keywords: [fine-tuning vs RAG, LLM fine-tuning, retrieval augmented generation, RAG pipeline, when to fine-tune LLM, AI product architecture]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=1200&q=80&auto=format&fit=crop
+---
+
+One of the most common questions we hear when scoping AI products: "Should we fine-tune a model or use RAG?" The answer depends on which problem you're actually trying to solve, and those problems are distinct.
+
+## What Each Approach Actually Does
+
+**RAG (Retrieval-Augmented Generation)** retrieves relevant documents from an external store at query time and injects them into the prompt as context. The model hasn't "learned" your data — it reads it fresh every request. Your knowledge base lives outside the model, can be updated without retraining, and is inspectable.
+
+**Fine-tuning** trains a model on your dataset to change its weights. The model internalises patterns from your data. The knowledge is baked in. You're modifying the model itself.
+
+## When RAG Is the Right Choice
+
+RAG is appropriate when:
+
+**Your data changes frequently.** A customer support system with product documentation that updates weekly cannot fine-tune on every cycle. RAG reads from your document store directly — update the documents, the model's answers update immediately.
+
+**You need citations and source traceability.** RAG returns the source chunks it used. Fine-tuned models generate from learned weights and cannot point to a source document.
+
+**You have a large, diverse knowledge base.** A fine-tuned model has a limited context capacity for learned facts. For knowledge bases with thousands of documents covering different domains, RAG scales naturally.
+
+**Budget is a constraint.** A RAG pipeline over an existing model (embedding + vector search + inference) costs significantly less than fine-tuning and hosting a custom model.
+
+## When Fine-Tuning Is the Right Choice
+
+Fine-tuning is appropriate when:
+
+**You need to modify the model's behaviour, not its knowledge.** Teaching a model a specific output format, tone, persona, or reasoning style is what fine-tuning does well. RAG can't change how the model speaks — it can only give it more information.
+
+**You have consistent, high-quality labelled examples of the desired behaviour.** Fine-tuning requires training data in `{input: ..., output: ...}` pairs. If you have hundreds of examples of the exact input-output behaviour you want, fine-tuning can produce a model that reliably reproduces it.
+
+**Latency is critical.** Fine-tuned models with smaller context (no retrieved documents in the prompt) respond faster than RAG pipelines. For latency-sensitive applications, fine-tuning on a smaller model can outperform RAG on a larger one.
+
+**Your domain has unique terminology or conventions the base model doesn't know.** Medical, legal, or financial domains with specialised language often benefit from fine-tuning to get the model to use terminology correctly and consistently.
+
+## The Combination Approach
+
+In practice, many production AI systems use both:
+
+1. **Fine-tune** a model on the desired output format and behaviour
+2. **Add RAG** for grounding responses in current, factual, proprietary knowledge
+
+A customer support agent fine-tuned to always respond in a specific persona and output format, with RAG providing current product documentation, outperforms either approach alone.
+
+## Cost Comparison
+
+| Approach | One-time cost | Ongoing cost | Update cost |
+|---|---|---|---|
+| RAG | Vector DB setup, chunking pipeline | Embedding queries + inference | Add/update documents |
+| Fine-tuning | Training compute ($50–$2,000+ per run) | Hosting fine-tuned model | Re-train on updated dataset |
+| Both | High | Medium | Medium |
+
+For most products: start with RAG. Fine-tuning is rarely justified until you've deployed RAG and identified a specific behaviour gap that retrieval can't address.
+
+## RAG Implementation Quality Matters More Than Model Choice
+
+The most common RAG failure mode: good model, bad retrieval. If the right documents aren't retrieved, the model will hallucinate regardless of its capabilities.
+
+Three retrieval quality improvements that consistently matter:
+
+**Chunking strategy**: Semantic chunking (split at logical boundaries) outperforms fixed-size chunking. A 500-token chunk that cuts a sentence in half will produce incoherent retrieved context.
+
+**Hybrid search**: Combine dense vector search (semantic) with sparse BM25 (keyword). Pure vector search misses exact-match queries; pure BM25 misses semantic variations. Hybrid consistently outperforms either alone.
+
+**Reranking**: Take your top-20 vector search results and rerank with a cross-encoder model (Cohere Rerank, ColBERT) before selecting the top-5. This precision improvement is worth the latency cost for most use cases.
+
+```python
+# Example RAG pipeline with reranking
+from cohere import Client
+
+co = Client(api_key)
+
+# 1. Get top-20 candidates from vector search
+candidates = vector_db.search(query_embedding, top_k=20)
+
+# 2. Rerank to top-5
+reranked = co.rerank(
+    query=user_query,
+    documents=[c.text for c in candidates],
+    top_n=5,
+    model='rerank-english-v2.0',
+)
+
+# 3. Build context for LLM
+context = "\n\n".join([candidates[r.index].text for r in reranked.results])
+```
+
+---
+
+The right architecture depends on your specific use case, data characteristics, and performance requirements. If you're planning an AI product and want to avoid the common mistakes that waste months of engineering effort, [our team scopes AI integrations before writing a line of code](/contact).

@@ -1,0 +1,68 @@
+---
+title: How AI Voice Agents Are Replacing Front-Desk Staff — And What That Means for Your Business
+description: A practical look at AI voice agents, how they work, what problems they solve, and the real-world results businesses are seeing from deploying them.
+date: 2025-04-22
+category: AI Integration & Agents
+keywords: [AI voice agents, AI phone agents, AI customer service, artificial intelligence business, LLM integration, conversational AI, small business AI]
+readingTime: 7
+---
+
+The phone is still the dominant channel for small business customer interaction. Spas, law firms, clinics, repair shops, and dental practices all share the same problem: calls come in continuously, staff answer them between tasks, and every missed call is a missed booking.
+
+AI voice agents solve this problem completely. Not as a chatbot that frustrates callers — as a voice that responds in under half a second, holds a natural conversation, handles bookings, answers questions, and escalates to a human when necessary.
+
+We built [Tiredus](https://tiredus.com) on exactly this premise, and the results we've seen from early deployments are difficult to argue with: 312% more consultations booked, 92% of customer inquiries resolved without human intervention.
+
+## How They Actually Work
+
+An AI voice agent is a pipeline:
+
+**1. Speech-to-Text (STT)**
+The caller's voice is transcribed in real-time, usually by Whisper or a proprietary STT model, with latency under 200ms.
+
+**2. Language Model Processing**
+The transcribed text is passed to an LLM (GPT-4o, Claude 3.5, or a fine-tuned model) with a system prompt that defines the agent's persona, knowledge base, and decision rules. The model generates a response.
+
+**3. Text-to-Speech (TTS)**
+The response is synthesised to audio using ElevenLabs, PlayHT, or a similar provider. Modern TTS at 11labs quality is indistinguishable from a competent human voice actor.
+
+**4. Orchestration**
+A layer between these components manages conversation state, tool calls (calendar APIs, CRM lookups, knowledge base searches), fallback logic, and escalation triggers.
+
+The entire round-trip — from end of caller speech to start of agent speech — runs in under 500ms when implemented correctly. Callers rarely notice the difference.
+
+## What AI Voice Agents Can Handle Today
+
+- **Appointment booking**: Real-time calendar sync with Google Calendar, Calendly, and Outlook. The agent checks availability, proposes slots, and confirms bookings without any human involvement.
+- **FAQ and knowledge base queries**: "What are your opening hours?", "Do you accept insurance?", "What's the cancellation policy?" — answered instantly, consistently, and correctly every time.
+- **Lead qualification**: For professional services firms, the agent can ask intake questions, determine fit, and route qualified leads to a senior member of staff.
+- **After-hours handling**: The agent is available 24/7. It doesn't matter if the call comes in at 2am on a Sunday.
+- **Multilingual support**: Modern LLMs handle 30+ languages without separate deployments. The agent detects the caller's language and responds in kind.
+
+## Where Human Oversight Remains Essential
+
+AI voice agents are not a complete replacement for human judgment in every context. Some limitations:
+
+**Complex emotional situations**: A distressed caller, a complaint that requires empathy and negotiation, or a situation that requires genuine discretion — these benefit from human handling. Good implementations detect emotional escalation and transfer the call.
+
+**Novel edge cases**: The agent knows what it's been trained and prompted to handle. Truly novel requests outside its knowledge scope should be routed to a human rather than hallucinated.
+
+**High-stakes decisions**: Legal advice, medical diagnosis, complex financial guidance — the agent should be a triage and routing layer, not the final word.
+
+The correct frame is augmentation, not replacement. The agent handles the predictable 85% of interactions; your team focuses on the 15% that require human judgment.
+
+## Implementation Considerations
+
+**Latency is everything.** A voice agent that responds in 800ms feels broken. Optimise for sub-500ms end-to-end, which requires careful selection and placement of STT, LLM, and TTS providers.
+
+**Prompt engineering is the product.** The agent's persona, knowledge base, decision tree, and escalation rules live in its system prompt and fine-tuning data. Getting this right takes iteration — plan for it.
+
+**Integration depth determines value.** An agent that can only answer questions is a FAQ page with a voice. An agent that reads your calendar, checks your CRM, and creates bookings in your existing tools is a front-desk member of staff.
+
+**Compliance and call recording.** In most jurisdictions, you must inform callers they're speaking to an AI. Handle call recordings and transcripts in line with data protection requirements.
+
+## Getting Started
+
+The fastest path to a working AI voice agent is using a platform built for it — we built [Tiredus](https://tiredus.com) specifically for small businesses that want to deploy in minutes, not months.
+
+For businesses with more complex requirements — custom CRM integration, enterprise compliance, or voice agents embedded in an existing product — [our team builds bespoke implementations](/contact) on top of the same underlying infrastructure.

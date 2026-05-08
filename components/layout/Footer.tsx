@@ -3,6 +3,7 @@ import { services } from "@/lib/constants";
 
 const companyLinks = [
   { label: "Portfolio", href: "/portfolio" },
+  { label: "Blog", href: "/blog" },
   { label: "About", href: "/#why" },
   { label: "Process", href: "/#process" },
   { label: "Contact", href: "/contact" },

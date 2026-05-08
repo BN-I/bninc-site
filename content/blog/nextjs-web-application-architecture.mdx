@@ -1,0 +1,119 @@
+---
+title: Building Scalable Web Applications with Next.js — Architecture Decisions That Matter
+description: A deep dive into the architectural patterns that separate Next.js apps that scale from ones that become unmaintainable. Server Components, data fetching, caching, and deployment.
+date: 2025-04-15
+category: Web Application Development
+keywords: [nextjs web application, next.js architecture, web app development, server components, react server components, scalable web app]
+readingTime: 9
+---
+
+Next.js 15 with the App Router isn't just a framework upgrade — it's a fundamental shift in how you think about rendering, data fetching, and server/client boundaries. Teams that carry old mental models from the Pages Router into App Router projects end up fighting the framework. Teams that understand the model build things that are fast, maintainable, and genuinely scalable.
+
+This is the architecture we apply on every web project at BNinc.
+
+## Server Components First
+
+The default in the App Router is Server Components — everything runs on the server unless you explicitly opt into the client with `'use client'`. This is the right default, and you should resist the urge to add `'use client'` prematurely.
+
+Server Components can:
+- Fetch data directly from databases and APIs without going through a client-side fetch
+- Access secrets and environment variables
+- Reduce JavaScript bundle size (they send only HTML, not component code)
+
+A common mistake: adding `'use client'` to a component that uses a server-side data fetch because a child component needs interactivity. The correct pattern is to push `'use client'` as deep as possible — keep the parent as a Server Component and make only the interactive leaf a Client Component.
+
+## Data Fetching Patterns
+
+### Colocate fetches with components
+
+In the App Router, fetch data in the component that needs it. Don't prop-drill data from a top-level layout through multiple layers to reach the component that actually uses it.
+
+```tsx
+// ✅ Good — data fetched where it's used
+async function UserProfile({ userId }: { userId: string }) {
+  const user = await db.users.findUnique({ where: { id: userId } })
+  return <div>{user.name}</div>
+}
+```
+
+This is only possible because Server Components can be async. The framework deduplicates fetch calls across a request automatically.
+
+### Use `cache()` for shared data
+
+When the same data is needed by multiple components in a single render, use React's `cache()` function to ensure it's only fetched once:
+
+```ts
+import { cache } from 'react'
+
+export const getUser = cache(async (id: string) => {
+  return db.users.findUnique({ where: { id } })
+})
+```
+
+Every call to `getUser` with the same `id` within a single request shares the same result without a network round-trip.
+
+### Parallel fetches
+
+Independent data requirements should be fetched in parallel:
+
+```tsx
+async function DashboardPage() {
+  // Both fetch simultaneously
+  const [user, stats] = await Promise.all([
+    getUser(userId),
+    getStats(userId),
+  ])
+  return <Dashboard user={user} stats={stats} />
+}
+```
+
+## Caching Strategy
+
+Next.js has a multi-layer cache that you need to understand explicitly:
+
+1. **Request Memoization**: Per-request deduplication of `fetch` and `cache()` calls
+2. **Data Cache**: Persistent across requests (configurable TTL or on-demand revalidation)
+3. **Full Route Cache**: Pre-rendered HTML cached at the CDN edge
+4. **Router Cache**: Client-side cache of visited routes
+
+For most applications: statically generate everything you can, use `revalidate` for content that changes occasionally, and use dynamic rendering only for truly user-specific pages.
+
+```tsx
+// Revalidate every hour
+export const revalidate = 3600
+
+// Opt out of caching for user-specific pages
+export const dynamic = 'force-dynamic'
+```
+
+## Database Layer
+
+**Don't use an ORM that requires a persistent connection** in a serverless environment — connection pooling becomes a bottleneck at scale. Prisma with PgBouncer, Drizzle ORM with direct queries, or Supabase's pooler work well.
+
+**Schema design is the most important architectural decision** and the hardest to undo. Spend more time here than you think you need to. A poorly designed schema causes performance issues that can't be fixed with query optimisation alone.
+
+## API Routes vs Server Actions
+
+Use **API Routes** (`app/api/`) for:
+- Webhooks that receive data from external services
+- Endpoints consumed by mobile apps or third-party services
+
+Use **Server Actions** for:
+- Form submissions
+- Mutations triggered from the UI
+- Any data change that starts and ends on your own app
+
+Server Actions eliminate the boilerplate of writing a fetch call to your own API — the function is called directly from the client and executed on the server.
+
+## Deployment Architecture
+
+For most web applications, the correct deployment target is:
+- **Vercel** for teams that want zero-configuration deployment with automatic edge distribution
+- **AWS App Runner or ECS** for teams with existing AWS infrastructure or compliance requirements
+- **Self-hosted on EC2/Fargate** when data sovereignty is a hard constraint
+
+The one thing to get right early: put a CDN in front of everything, even on AWS. CloudFront or Vercel's edge network will absorb traffic spikes that would otherwise take down your origin.
+
+---
+
+If you're designing a new web application or trying to rescue a struggling one, [talk to our team](/contact). We've built on this stack across industries and can usually identify the root bottleneck in a single technical call.

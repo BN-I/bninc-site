@@ -1,0 +1,209 @@
+---
+title: Expo EAS — The Complete Build and Submission Workflow
+description: A complete walkthrough of Expo EAS Build, EAS Submit, and EAS Update — build profiles, secrets management, CI integration, and submitting to the App Store and Play Store.
+date: 2026-03-19
+category: Cross-Platform Development
+keywords: [expo EAS build, EAS submit, expo build workflow, app store submission, google play submission, expo CI CD]
+readingTime: 9
+coverImage: https://images.unsplash.com/photo-1555774698-0b77e0d5fac6?w=1200&q=80&auto=format&fit=crop
+---
+
+EAS Build has eliminated the most painful part of React Native development: managing native build environments. Before EAS, every team needed a Mac with Xcode, configured code signing, and someone who understood the cryptographic chain from developer certificate to provisioning profile. EAS manages all of that in the cloud.
+
+Here's the complete workflow we use from development to production submission.
+
+## EAS Build Profiles
+
+Everything in EAS is configured in `eas.json` at your project root. Build profiles define what kind of build to produce:
+
+```json
+{
+  "cli": { "version": ">= 10.0.0" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": { "simulator": true },
+      "android": { "buildType": "apk" }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "enterpriseProvisioning": "adhoc"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "ios": {
+        "image": "latest",
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "your@email.com",
+        "ascAppId": "1234567890",
+        "appleTeamId": "XXXXXXXXXX"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal"
+      }
+    }
+  }
+}
+```
+
+Three profiles cover most workflows:
+- `development`: simulator/emulator builds with Expo Dev Client for local development
+- `preview`: internal distribution builds for QA and stakeholder review
+- `production`: App Store / Play Store builds
+
+## Secrets Management
+
+Never commit certificates, keystores, API keys, or service account JSON files. EAS manages secrets in three scopes:
+
+**Account secrets**: Available to all projects in your Expo account
+**Project secrets**: Available to this project's builds only
+**Build environment variables**: Set in `eas.json` or per-build
+
+```bash
+# Set a project secret (values are encrypted, never visible after setting)
+eas secret:create --scope project --name GOOGLE_MAPS_API_KEY --value "your_key_here"
+eas secret:create --scope project --name SENTRY_DSN --value "https://xxx@sentry.io/xxx"
+```
+
+Access secrets in your app code via `process.env.GOOGLE_MAPS_API_KEY` — EAS injects them as environment variables during the build.
+
+For secrets that need to be in app.config.js (e.g. to configure native modules):
+
+```javascript
+// app.config.js
+export default {
+  expo: {
+    plugins: [
+      ['@rnmapbox/maps', {
+        RNMapboxMapsDownloadToken: process.env.MAPBOX_TOKEN,
+      }],
+    ],
+  },
+}
+```
+
+## Code Signing
+
+EAS can manage code signing entirely, or you can bring your own certificates.
+
+For iOS with automatic credentials (recommended for most teams):
+
+```bash
+eas credentials
+```
+
+EAS will create and manage your App Store distribution certificate and provisioning profiles. If you need to rotate credentials, EAS handles the revocation and re-creation.
+
+For teams with existing credentials, add them via `eas credentials --platform ios`.
+
+For Android, EAS generates and manages your keystore. **Critical**: download and back up your keystore. If you lose your keystore, you cannot update your app — you would need to publish a new app with a new package name.
+
+```bash
+eas credentials:sync --platform android
+```
+
+## Running Builds
+
+```bash
+# Development simulator build
+eas build --profile development --platform ios
+
+# Production build for both platforms
+eas build --profile production --platform all
+
+# Build and watch logs
+eas build --profile production --platform ios --wait
+```
+
+EAS builds run in the cloud and typically take 10–20 minutes for production iOS builds. Use `--wait` to stream logs, or check the EAS dashboard at expo.dev.
+
+## CI Integration
+
+For automated production builds on merge to main:
+
+```yaml
+# .github/workflows/eas-build.yml
+name: EAS Production Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'package.json'
+      - 'app.json'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build for production
+        run: eas build --profile production --platform all --non-interactive
+```
+
+The `--non-interactive` flag is essential in CI — it prevents the build from hanging waiting for keyboard input.
+
+## EAS Submit
+
+After a production build, submit directly to stores:
+
+```bash
+# Submit latest build
+eas submit --platform ios --profile production --latest
+eas submit --platform android --profile production --latest
+
+# Or chain build and submit
+eas build --profile production --platform all --auto-submit
+```
+
+For iOS, you need an App Store Connect API key for automated submission (avoids 2FA prompts). Generate one in App Store Connect under Users and Access → Integrations → App Store Connect API.
+
+## EAS Update (OTA)
+
+JavaScript changes can be pushed directly to users without a new store submission:
+
+```bash
+# Push update to production channel
+eas update --branch production --message "Fix booking confirmation bug"
+```
+
+Users receive the update in the background on their next app launch. The update applies on the launch after that.
+
+Use OTA updates for:
+- Bug fixes in JS/TypeScript code
+- Copy and content changes
+- Feature flags that don't require new native modules
+
+Do not use OTA for changes that modify native code, add new native packages, or change the app's native configuration.
+
+---
+
+EAS has made the React Native build and release process reliable enough that we automate it entirely — every merge to main triggers a production build, and every tagged release submits automatically. If you want this pipeline set up for your project, [our team can configure it](/contact).

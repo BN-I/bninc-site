@@ -83,6 +83,12 @@ export function Navbar() {
               Portfolio
             </Link>
             <Link
+              href="/blog"
+              className="font-display font-bold text-sm text-teal-50/80 hover:text-white transition-colors"
+            >
+              Blog
+            </Link>
+            <Link
               href="/#why"
               className="font-display font-bold text-sm text-teal-50/80 hover:text-white transition-colors"
             >
@@ -168,6 +174,7 @@ export function Navbar() {
               <div className="flex flex-col gap-4">
                 {[
                   { href: '/portfolio', label: 'Portfolio' },
+                  { href: '/blog', label: 'Blog' },
                   { href: '/#why', label: 'About' },
                   { href: '/contact', label: 'Contact' },
                 ].map((item, i) => (

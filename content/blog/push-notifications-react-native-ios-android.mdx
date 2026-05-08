@@ -1,0 +1,177 @@
+---
+title: Push Notifications in React Native — Architecture for iOS and Android
+description: How to implement push notifications in React Native correctly — Expo push service, APNs, FCM, channels, background handling, and notification permissions.
+date: 2026-04-23
+category: Mobile App Development
+keywords: [react native push notifications, expo notifications, APNs, Firebase FCM, notification channels, mobile notifications]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=1200&q=80&auto=format&fit=crop
+---
+
+Push notifications in React Native have a reputation for being painful. The reputation is half-deserved. The underlying APIs — APNs on iOS, FCM on Android — are well-designed but require understanding the full delivery chain. Most problems come from shortcuts taken during setup that produce hard-to-diagnose failures in production.
+
+This is the architecture we use on every app we build.
+
+## The Delivery Chain
+
+Every push notification goes through this chain:
+
+```
+Your server
+  → Push provider (Expo, Firebase, or direct APNs/FCM)
+  → APNs (iOS) or FCM (Android)
+  → Device
+  → Your app
+```
+
+Each step can fail silently. Understanding the chain is essential for debugging.
+
+**Expo Push Notifications** simplifies this for React Native by abstracting APNs and FCM behind a single API. If you're on Expo, use it. If you're on bare React Native, you still have the option to use `expo-notifications` with your own backend or go direct to FCM/APNs.
+
+## Setting Up with Expo
+
+```bash
+npx expo install expo-notifications expo-device expo-constants
+```
+
+The setup involves three concerns: token registration, permission request, and notification handling.
+
+### Token Registration
+
+An Expo push token uniquely identifies a device+app combination. You must register the token on your backend to send notifications to this device.
+
+```typescript
+import * as Notifications from 'expo-notifications'
+import * as Device from 'expo-device'
+import Constants from 'expo-constants'
+
+async function registerForPushNotifications(): Promise<string | null> {
+  if (!Device.isDevice) return null // Push tokens don't work in simulators
+
+  const { status: existingStatus } = await Notifications.getPermissionsAsync()
+  let finalStatus = existingStatus
+
+  if (existingStatus !== 'granted') {
+    const { status } = await Notifications.requestPermissionsAsync()
+    finalStatus = status
+  }
+
+  if (finalStatus !== 'granted') return null
+
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId
+  const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+
+  return token
+}
+```
+
+Send this token to your backend on every app launch — tokens can change and you need to keep your database current.
+
+### Android Notification Channels
+
+Android 8.0+ requires notification channels. Each channel has its own sound, vibration, and importance settings, and the user can disable individual channels. Create channels at app startup:
+
+```typescript
+if (Platform.OS === 'android') {
+  await Notifications.setNotificationChannelAsync('messages', {
+    name: 'Messages',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    sound: 'default',
+  })
+
+  await Notifications.setNotificationChannelAsync('updates', {
+    name: 'App Updates',
+    importance: Notifications.AndroidImportance.LOW,
+    sound: null,
+  })
+}
+```
+
+Categorise channels by user relevance. Users are more likely to disable a channel than uninstall the app — giving them granular control reduces opt-out.
+
+### Handling Notifications
+
+You need three handlers: one for foreground notifications (app is open), one for notification taps (app brought to foreground from background/killed), and one for background tasks.
+
+```typescript
+// Configure foreground behaviour
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+})
+
+// In your root component
+useEffect(() => {
+  // Notification received while app is foregrounded
+  const foregroundSub = Notifications.addNotificationReceivedListener(
+    (notification) => {
+      console.log('Received:', notification)
+    }
+  )
+
+  // User tapped a notification
+  const responseSub = Notifications.addNotificationResponseReceivedListener(
+    (response) => {
+      const data = response.notification.request.content.data
+      // Navigate to relevant screen based on data
+      handleNotificationNavigation(data)
+    }
+  )
+
+  return () => {
+    foregroundSub.remove()
+    responseSub.remove()
+  }
+}, [])
+```
+
+### Handling Cold Start (App Was Killed)
+
+When a user taps a notification that launches a cold app, you need to check the initial notification at startup:
+
+```typescript
+const lastNotificationResponse = await Notifications.getLastNotificationResponseAsync()
+if (lastNotificationResponse) {
+  const data = lastNotificationResponse.notification.request.content.data
+  handleNotificationNavigation(data)
+}
+```
+
+This is the most commonly missed step. Without it, deep links from notifications don't work when the app is killed.
+
+## Sending from Your Backend
+
+Using the Expo push API directly:
+
+```typescript
+const messages = tokens.map((token) => ({
+  to: token,
+  sound: 'default',
+  title: 'New message',
+  body: 'You have a message from Sarah',
+  data: { screen: 'Messages', conversationId: '123' },
+  channelId: 'messages', // Android channel
+}))
+
+const response = await fetch('https://exp.host/--/api/v2/push/send', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(messages),
+})
+```
+
+Always check push receipts 15 minutes after sending — they tell you whether tokens are invalid, and you should remove dead tokens from your database.
+
+## Permission Timing
+
+iOS requires explicit permission to send notifications. The system dialog can only be shown once. If the user denies it, you have to send them to Settings to re-enable. This means timing the permission request correctly is critical.
+
+Don't ask on first launch. Ask when the user has experienced value from notifications — after their first order is placed, their first message arrives, or their first booking is confirmed. Contextual permission requests convert at 2–3× the rate of cold requests.
+
+---
+
+Push notifications, done right, are one of the highest-retention features in a mobile product. If you're building a React Native app and want the notification architecture done correctly from the start, [our team handles this as part of every mobile build](/contact).

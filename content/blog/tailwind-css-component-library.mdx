@@ -1,0 +1,254 @@
+---
+title: Building a Production Component Library with Tailwind CSS
+description: How to build a scalable, consistent component library using Tailwind CSS — design tokens, component variants with CVA, accessible patterns, and dark mode.
+date: 2026-01-01
+category: Web Application Development
+keywords: [tailwind css component library, CVA class variance authority, design system tailwind, tailwind design tokens, accessible components]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1561070791-2526d30994b5?w=1200&q=80&auto=format&fit=crop
+---
+
+Tailwind CSS utility classes are fast to write but notoriously easy to misuse. A Tailwind codebase without a component abstraction layer quickly becomes a soup of inconsistent utilities — buttons with 12 different shades of blue, spacing that varies by 4px across screens, and hover states that conflict with each other.
+
+A proper component library built on Tailwind solves this. Here's how we structure it.
+
+## Design Tokens as Tailwind Theme Config
+
+The foundation of a consistent UI is a restricted set of design decisions: a colour palette, a type scale, a spacing scale. In Tailwind, these are defined in `tailwind.config.ts`:
+
+```typescript
+// tailwind.config.ts
+import type { Config } from 'tailwindcss'
+
+export default {
+  content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          50: '#f0fdf4',
+          500: '#22c55e',
+          600: '#16a34a',
+          700: '#15803d',
+          900: '#14532d',
+        },
+        surface: {
+          DEFAULT: '#ffffff',
+          muted: '#f8fafc',
+          subtle: '#f1f5f9',
+        },
+      },
+      fontFamily: {
+        display: ['var(--font-syne)', 'system-ui', 'sans-serif'],
+        body: ['var(--font-dm-sans)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-dm-mono)', 'monospace'],
+      },
+      fontSize: {
+        '2xs': ['0.625rem', { lineHeight: '1rem' }],
+      },
+    },
+  },
+} satisfies Config
+```
+
+Defining `brand` and `surface` colours means your components use `bg-brand-500` instead of `bg-green-500`. This single abstraction makes rebranding a theme change, not a find-and-replace across 200 files.
+
+## Class Variance Authority (CVA)
+
+CVA is the correct tool for component variants in Tailwind. It generates type-safe variant maps that compose cleanly:
+
+```typescript
+// components/ui/Button.tsx
+import { cva, type VariantProps } from 'class-variance-authority'
+import { cn } from '@/lib/utils'
+
+const buttonVariants = cva(
+  // Base classes — always applied
+  'inline-flex items-center justify-center gap-2 rounded-lg font-display font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:pointer-events-none disabled:opacity-50',
+  {
+    variants: {
+      variant: {
+        primary: 'bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800',
+        secondary: 'bg-surface-subtle text-slate-900 hover:bg-slate-200 active:bg-slate-300',
+        outline: 'border border-slate-200 bg-transparent text-slate-900 hover:bg-surface-subtle',
+        ghost: 'bg-transparent text-slate-700 hover:bg-surface-subtle',
+        destructive: 'bg-red-600 text-white hover:bg-red-700',
+      },
+      size: {
+        sm: 'h-8 px-3 text-sm',
+        md: 'h-10 px-4 text-sm',
+        lg: 'h-12 px-6 text-base',
+        icon: 'h-10 w-10',
+      },
+    },
+    defaultVariants: {
+      variant: 'primary',
+      size: 'md',
+    },
+  }
+)
+
+interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean
+}
+
+export function Button({ className, variant, size, ...props }: ButtonProps) {
+  return (
+    <button
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  )
+}
+```
+
+```typescript
+// lib/utils.ts
+import { clsx, type ClassValue } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+```
+
+`twMerge` handles class conflicts: `cn('px-4', 'px-6')` correctly produces `'px-6'` instead of both.
+
+## Accessible Form Components
+
+Form components need more than visual polish — they need semantic correctness and keyboard accessibility:
+
+```tsx
+// components/ui/Input.tsx
+import { forwardRef } from 'react'
+import { cn } from '@/lib/utils'
+
+interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string
+  error?: string
+  hint?: string
+}
+
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ label, error, hint, id, className, ...props }, ref) => {
+    const inputId = id ?? label.toLowerCase().replace(/\s+/g, '-')
+    const errorId = `${inputId}-error`
+    const hintId = `${inputId}-hint`
+
+    return (
+      <div className="space-y-1.5">
+        <label
+          htmlFor={inputId}
+          className="block font-display font-medium text-sm text-slate-700"
+        >
+          {label}
+          {props.required && (
+            <span className="ml-1 text-red-500" aria-hidden>*</span>
+          )}
+        </label>
+
+        <input
+          ref={ref}
+          id={inputId}
+          aria-describedby={[hint && hintId, error && errorId]
+            .filter(Boolean)
+            .join(' ')}
+          aria-invalid={!!error}
+          className={cn(
+            'block w-full rounded-lg border px-3 py-2 text-sm transition-colors',
+            'placeholder:text-slate-400',
+            'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent',
+            error
+              ? 'border-red-400 bg-red-50'
+              : 'border-slate-300 bg-white hover:border-slate-400',
+            className
+          )}
+          {...props}
+        />
+
+        {hint && !error && (
+          <p id={hintId} className="text-xs text-slate-500">{hint}</p>
+        )}
+        {error && (
+          <p id={errorId} role="alert" className="text-xs text-red-600">{error}</p>
+        )}
+      </div>
+    )
+  }
+)
+
+Input.displayName = 'Input'
+```
+
+## Dark Mode
+
+Tailwind's class-based dark mode is the most flexible approach:
+
+```typescript
+// tailwind.config.ts
+export default {
+  darkMode: 'class', // Adds dark: variant when <html class="dark">
+  theme: {
+    extend: {
+      colors: {
+        surface: {
+          DEFAULT: 'rgb(var(--color-surface) / <alpha-value>)',
+          muted: 'rgb(var(--color-surface-muted) / <alpha-value>)',
+        },
+      },
+    },
+  },
+}
+```
+
+```css
+/* globals.css */
+:root {
+  --color-surface: 255 255 255;
+  --color-surface-muted: 248 250 252;
+}
+
+.dark {
+  --color-surface: 15 23 42;
+  --color-surface-muted: 30 41 59;
+}
+```
+
+CSS custom properties that switch values via the `dark` class mean your components don't need explicit `dark:` variants for every colour — they inherit the right value automatically.
+
+## Component Documentation with Storybook
+
+A component library without documentation becomes a component library nobody uses. Storybook is the standard:
+
+```typescript
+// components/ui/Button.stories.tsx
+import type { Meta, StoryObj } from '@storybook/react'
+import { Button } from './Button'
+
+const meta: Meta<typeof Button> = {
+  component: Button,
+  tags: ['autodocs'],
+}
+
+export default meta
+
+export const Primary: StoryObj<typeof Button> = {
+  args: { children: 'Book a call', variant: 'primary' },
+}
+
+export const AllVariants: StoryObj<typeof Button> = {
+  render: () => (
+    <div className="flex gap-4 flex-wrap">
+      {(['primary', 'secondary', 'outline', 'ghost', 'destructive'] as const).map(
+        (v) => <Button key={v} variant={v}>{v}</Button>
+      )}
+    </div>
+  ),
+}
+```
+
+---
+
+A well-built component library pays for itself quickly on multi-screen products. Consistency across views, faster feature development, and a single place to fix accessibility issues — all from the component layer. If you're starting a new web product, [our team builds the component library as part of the initial architecture](/contact).

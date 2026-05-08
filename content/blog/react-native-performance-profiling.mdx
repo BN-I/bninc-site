@@ -1,0 +1,150 @@
+---
+title: Profiling React Native Apps — Finding and Fixing Performance Bottlenecks
+description: How to diagnose performance problems in React Native apps using the React DevTools profiler, Flipper, and the performance monitor — and how to fix the most common issues.
+date: 2026-02-19
+category: Cross-Platform Development
+keywords: [react native performance, react native profiler, Flipper react native, react native optimization, FlatList performance, re-render optimization]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200&q=80&auto=format&fit=crop
+---
+
+React Native performance problems fall into two categories: JS thread problems and UI thread problems. The symptoms look similar (janky animations, slow interactions) but the causes and fixes are entirely different. Profiling before optimising is not optional — guessing at the root cause wastes time and often makes things worse.
+
+## The Two Threads
+
+React Native runs on two primary threads:
+
+**JS Thread**: Runs your React component code, business logic, and state updates. A blocked JS thread produces delayed responses to user input — taps register late, text input lags.
+
+**UI Thread (Main Thread)**: Runs native rendering, animations, and gesture handling. A blocked UI thread drops frames — animations stutter, scrolling jerks.
+
+The performance monitor (in the dev menu → Performance Monitor) shows both: JS FPS and UI FPS. They fail independently and require different solutions.
+
+## React DevTools Profiler
+
+The React profiler identifies which components are re-rendering, how often, and how long each render takes.
+
+Enable it via the Chrome DevTools → Profiler tab, or use Flipper's React DevTools plugin.
+
+The most common finding: components re-rendering when nothing visible to them has changed. The primary culprits:
+
+**Inline objects and functions in props:**
+
+```typescript
+// Bad — new object reference on every parent render
+<BookingCard
+  style={{ margin: 16, padding: 8 }}
+  onPress={() => navigation.navigate('Detail', { id })}
+/>
+
+// Good — stable references
+const cardStyle = { margin: 16, padding: 8 } // outside component or StyleSheet.create
+const handlePress = useCallback(
+  () => navigation.navigate('Detail', { id }),
+  [id, navigation]
+)
+
+<BookingCard style={cardStyle} onPress={handlePress} />
+```
+
+**Context over-triggering:**
+
+A single React Context that holds multiple pieces of state will re-render every consumer when any piece of state changes — even if the consumer only uses one piece.
+
+Split contexts by update frequency. Authentication state (changes rarely) and UI state (changes constantly) should be separate contexts.
+
+## FlatList Performance
+
+Long lists are the most common source of React Native performance problems. The built-in `FlatList` has known performance limitations.
+
+**Switch to FlashList first:**
+
+```bash
+npx expo install @shopify/flash-list
+```
+
+```typescript
+import { FlashList } from '@shopify/flash-list'
+
+<FlashList
+  data={items}
+  renderItem={({ item }) => <BookingCard booking={item} />}
+  estimatedItemSize={120} // Required — measure your average item height
+  keyExtractor={(item) => item.id}
+/>
+```
+
+FlashList recycles views more aggressively than FlatList and typically produces 5–10× fewer render calls for long lists.
+
+If you must use FlatList, apply these optimisations:
+
+```typescript
+<FlatList
+  data={items}
+  renderItem={renderItem}
+  keyExtractor={keyExtractor}
+  maxToRenderPerBatch={10}
+  windowSize={10}
+  removeClippedSubviews={true}
+  getItemLayout={(_, index) => ({
+    length: ITEM_HEIGHT,
+    offset: ITEM_HEIGHT * index,
+    index,
+  })}
+/>
+```
+
+`getItemLayout` is only worth adding if your items are fixed height — it enables instant scroll-to-index and significantly reduces layout calculation overhead.
+
+## Memoisation — When It Helps and When It Doesn't
+
+`React.memo`, `useMemo`, and `useCallback` have a cost. The comparison itself takes time. Indiscriminate memoisation can make performance worse by adding comparison overhead without reducing renders.
+
+Apply memoisation to:
+- Components that receive stable props but are frequently included in renders of a parent that changes
+- Expensive computations that are called in the render path with the same inputs
+- Callbacks passed to `FlatList` item renderers (every re-render of the list's parent causes all items to re-render without `useCallback`)
+
+```typescript
+// Worth memoising — expensive filter + sort on large array
+const sortedBookings = useMemo(
+  () => bookings
+    .filter((b) => b.status === activeFilter)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+  [bookings, activeFilter]
+)
+
+// Not worth memoising — trivial, runs in microseconds
+const label = useMemo(() => `${firstName} ${lastName}`, [firstName, lastName])
+// Just write: const label = `${firstName} ${lastName}`
+```
+
+## Heavy Work Off the Main Thread
+
+Image processing, data parsing, cryptography, and other CPU-intensive operations should not run on the JS thread. Two options:
+
+**React Native Workers** (using `react-native-threads` or similar):
+
+```typescript
+import { Thread, self } from 'react-native-threads'
+
+const worker = new Thread('./worker.js')
+worker.postMessage(largeDataPayload)
+worker.onmessage = (result) => updateState(result)
+```
+
+**Native modules**: For truly performance-critical operations, a native module is the correct solution. The operation runs in a background native thread and communicates back via JSI.
+
+## Flipper Setup
+
+Flipper is still the most capable React Native debugging tool:
+
+1. Download Flipper from flipper.dev
+2. The Flipper plugin for React DevTools, Network, and Layout is included by default in Expo Go and dev client builds
+3. Key plugins to install: `react-devtools`, `hermes-debugger`, `network`, `layout`
+
+Hermes Debugger in Flipper is particularly useful — it attaches to the Hermes JS engine and gives you CPU profiles with flame graphs showing exactly which functions are consuming time.
+
+---
+
+Performance debugging is methodical, not intuitive. Measure first, fix what the profiler confirms, measure again. If you're building a React Native app and performance is a launch requirement, [we build with profiling and optimisation built into our process](/contact).

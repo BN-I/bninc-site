@@ -1,0 +1,102 @@
+---
+title: React Native New Architecture — What Fabric and JSI Mean for Your App
+description: A practical breakdown of Fabric and JSI, what actually changed in React Native's new architecture, and what it means for your production app performance.
+date: 2026-05-07
+category: Mobile App Development
+keywords: [react native new architecture, Fabric renderer, JSI, react native performance, react native 2025]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=1200&q=80&auto=format&fit=crop
+---
+
+React Native's new architecture has been "coming soon" for several years. As of 2024, it shipped as the default. If you're starting a new React Native project today, you're already on it. If you're maintaining an older app, you have a migration ahead of you. Either way, you need to understand what actually changed.
+
+The new architecture is two separate changes bundled together: **JSI** (JavaScript Interface) and **Fabric** (the new UI renderer). They're related but solve different problems.
+
+## JSI: The End of the Bridge
+
+The original React Native architecture used an asynchronous bridge to pass messages between JavaScript and native code. Every interaction — reading a native module, calling a native function, updating a view — went through this bridge as serialised JSON. The bridge was batched and async, which meant:
+
+- Native module calls could never be truly synchronous
+- Large data payloads (images, large arrays) were expensive to marshal
+- Third-party native modules couldn't hold references to JS objects
+
+JSI replaces the bridge with a C++ host object that the JavaScript engine can call directly. Your JS code gets a reference to a native object and can call methods on it synchronously, without serialisation.
+
+The practical impact:
+
+```typescript
+// Old architecture: async, fire-and-forget
+import { NativeModules } from 'react-native'
+NativeModules.Camera.takePicture(options, callback) // async callback
+
+// New architecture with JSI: synchronous, direct
+// Native modules can now return values synchronously
+const pixelData = NativeCamera.captureFrame() // returns immediately
+```
+
+For most apps, you won't notice this in everyday navigation and UI. Where you feel it immediately is in high-frequency interactions: animations driven by native values, gesture handlers that need zero-lag native feedback, and heavy computations in native modules (cryptography, image processing, SQLite queries).
+
+**react-native-reanimated** was rebuilt around JSI — that's why complex shared-value animations now run at 60/120fps without dropping frames when the JS thread is busy.
+
+## Fabric: Synchronous UI Rendering
+
+Fabric is the new C++ renderer, replacing the old UIManager. The key change: Fabric processes layout and commits view updates synchronously with the JavaScript render.
+
+In the old architecture, view creation went: JS thread → async bridge → shadow thread (Yoga layout) → main thread. The async hops meant you could never guarantee that a layout was committed before the next frame.
+
+Fabric makes the shadow tree a C++ data structure shared between threads. React 18's concurrent features (Suspense, `useTransition`, `startTransition`) can now work in React Native because Fabric understands the concept of rendering priority — it can interrupt low-priority renders in favour of user input.
+
+```typescript
+import { startTransition } from 'react'
+
+function SearchResults() {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+
+  function handleChange(text: string) {
+    setQuery(text) // urgent: update input immediately
+    startTransition(() => {
+      setResults(computeExpensiveResults(text)) // deferrable: can be interrupted
+    })
+  }
+
+  return <TextInput onChangeText={handleChange} />
+}
+```
+
+This pattern is useful for search inputs, filters on large lists, and any UI where you want to keep the input responsive while a heavy re-render catches up.
+
+## Migration Considerations
+
+If you're migrating an existing app, the main friction points are third-party native modules that haven't been updated to support the new architecture. The old bridge still exists as a compatibility layer — modules that haven't been updated continue to work through it.
+
+Check your dependencies with the React Native Directory's architecture filter. Key libraries to verify:
+- Navigation (React Navigation is fully supported)
+- Camera (`react-native-vision-camera` v3+ fully supports new arch)
+- Maps (`react-native-maps` supports it as of 1.10.x)
+- SQLite (`op-sqlite` is the new-arch-native option)
+- Reanimated 3+: fully rebuilt for new arch
+
+The migration itself is mostly handled by Expo if you're on the managed workflow. For bare React Native, the upgrade guide in the docs is accurate — the main manual step is enabling the new arch in your native build configuration:
+
+```ruby
+# iOS: Podfile
+ENV['RCT_NEW_ARCH_ENABLED'] = '1'
+```
+
+```gradle
+# Android: gradle.properties
+newArchEnabled=true
+```
+
+## What Doesn't Change
+
+The new architecture doesn't change how you write React Native UI. Components, hooks, StyleSheet, Flexbox — all the same. The new architecture sits below the React layer.
+
+What it unlocks over time is the ability to adopt features that required synchronous native access: synchronous storage reads, real-time camera frame processing, native gesture recognition without lag, and tight integration with platform APIs.
+
+If you're building a new app, start on the new architecture and don't look back. If you're maintaining an existing app, the migration is worthwhile but not urgent unless you're hitting performance limits that trace directly to the bridge.
+
+---
+
+If you're building a React Native app and want an architecture review before you commit to a technical direction, [our team can help](/contact). We've migrated production apps to the new architecture and know exactly where the edge cases are.

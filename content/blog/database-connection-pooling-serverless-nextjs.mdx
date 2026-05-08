@@ -1,0 +1,157 @@
+---
+title: Database Connection Pooling in Serverless Next.js — Prisma, Drizzle, and Neon
+description: Why connection pooling is critical in serverless Next.js, how each database option handles it differently, and the specific configuration that prevents connection exhaustion at scale.
+date: 2026-02-05
+category: Web Application Development
+keywords: [nextjs database connection pooling, Prisma serverless, Drizzle ORM, Neon postgres, PgBouncer nextjs, serverless database]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=1200&q=80&auto=format&fit=crop
+---
+
+The most common database problem we see in serverless Next.js applications: connection exhaustion. The application works fine in development and under low load, then starts throwing `too many clients` errors under real traffic. The root cause is always the same: serverless functions creating new database connections without proper pooling.
+
+This is a solvable problem, but the solution is different depending on your ORM and database provider.
+
+## Why Serverless Is Different
+
+In a traditional Node.js server, you create a database connection pool once at startup and reuse it across all requests. The pool size is bounded and managed.
+
+In a serverless environment, each function invocation is isolated. With a naive Prisma or pg setup, every cold start creates a new database connection. At 100 concurrent requests, you have 100 database connections. PostgreSQL's default connection limit is 100. The 101st request fails.
+
+```typescript
+// This creates a new connection on every cold start
+const prisma = new PrismaClient()
+```
+
+This code, copied from tutorials, works in development and destroys production under load.
+
+## The Prisma Singleton Pattern
+
+The standard fix for Prisma in Next.js is the global singleton pattern:
+
+```typescript
+// lib/prisma.ts
+import { PrismaClient } from '@prisma/client'
+
+const globalForPrisma = global as unknown as { prisma: PrismaClient }
+
+export const prisma =
+  globalForPrisma.prisma ?? new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+  })
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma
+}
+```
+
+In development, this prevents hot reload from creating multiple Prisma instances. In production serverless environments, it ensures a single instance per function container.
+
+**But this is not enough at scale.** A serverless deployment under load has many concurrent function containers. Each container has its own connection. You still exhaust the database connection limit.
+
+## PgBouncer: The Correct Solution for Postgres
+
+PgBouncer is a connection pooler that sits between your serverless functions and Postgres. Your functions connect to PgBouncer (which accepts thousands of connections), and PgBouncer maintains a small pool of real Postgres connections.
+
+Prisma's Accelerate (formerly Data Proxy) is a managed PgBouncer layer:
+
+```bash
+# Add connection pooling URL to .env
+DATABASE_URL="prisma://accelerate.prisma-data.net/?api_key=your_key"
+DATABASE_URL_DIRECT="postgresql://user:pass@host/db" # for migrations
+```
+
+```typescript
+// schema.prisma
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_DIRECT")
+}
+```
+
+The `directUrl` is used by Prisma Migrate to run migrations directly against the database.
+
+## Neon: Serverless Postgres
+
+Neon is a serverless Postgres provider that handles connection pooling natively. Every Neon project has a pooled connection string:
+
+```
+# Direct connection (for migrations only)
+postgresql://user:pass@host.neon.tech/db
+
+# Pooled connection (for application use)
+postgresql://user:pass@host.neon.tech/db?pgbouncer=true&connection_limit=1
+```
+
+Note `connection_limit=1` — this tells Prisma to use a single connection per instance. Neon's pooler handles the rest.
+
+With Drizzle ORM and Neon:
+
+```typescript
+// lib/db.ts
+import { neon } from '@neondatabase/serverless'
+import { drizzle } from 'drizzle-orm/neon-http'
+import * as schema from './schema'
+
+const sql = neon(process.env.DATABASE_URL!)
+export const db = drizzle(sql, { schema })
+```
+
+Neon's serverless driver uses HTTP for queries rather than persistent TCP connections — each query is a single HTTP request. This is ideal for serverless because there are no persistent connections to manage at all.
+
+## Supabase Connection Pooling
+
+Supabase exposes a Supavisor pooler with transaction and session mode:
+
+```
+# Session mode — maintains session-level state
+postgresql://user:pass@aws-0-us-east-1.pooler.supabase.com:5432/postgres
+
+# Transaction mode — pooled, stateless
+postgresql://user:pass@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+```
+
+For serverless functions, use transaction mode (port 6543). Session mode holds connections open for the duration of a session, which isn't meaningful in stateless serverless.
+
+## Drizzle ORM: Explicit and Lightweight
+
+Drizzle is worth considering if Prisma's connection management feels opaque. Drizzle is explicit about everything — you provide the driver, you control the connection:
+
+```typescript
+// lib/db.ts
+import postgres from 'postgres'
+import { drizzle } from 'drizzle-orm/postgres-js'
+import * as schema from './schema'
+
+// For serverless: use max: 1 to work correctly with connection poolers
+const client = postgres(process.env.DATABASE_URL!, { max: 1 })
+export const db = drizzle(client, { schema })
+```
+
+Drizzle queries are type-safe and compose well:
+
+```typescript
+// Type-safe query with Drizzle
+const bookings = await db
+  .select()
+  .from(schema.bookings)
+  .where(eq(schema.bookings.userId, userId))
+  .orderBy(desc(schema.bookings.createdAt))
+  .limit(20)
+```
+
+## What to Avoid
+
+- **Planetscale with JWTs**: Planetscale's HTTP driver doesn't support multi-statement transactions — if you need `BEGIN`/`COMMIT`, it's not the right choice.
+- **Long-running transactions in serverless**: Transactions that hold connections open for the function's duration prevent pooling from working. Keep transactions short and release them quickly.
+- **Ignoring `PGCONN_LIMIT` errors in logs**: These are a production incident waiting to happen. If you see them in staging, fix the pooling configuration before going live.
+
+---
+
+Database connection management is one of the less glamorous but most important infrastructure decisions in a Next.js application. If you're planning a web application and want the data layer designed correctly from the start, [our team can help](/contact).

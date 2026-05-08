@@ -1,0 +1,164 @@
+---
+title: React Native Testing Strategy — Unit, Component, and E2E with Detox
+description: A practical testing pyramid for React Native apps — what to test at each layer, how to structure Jest and RNTL tests, and running E2E with Detox in CI.
+date: 2026-04-09
+category: Mobile App Development
+keywords: [react native testing, Jest react native, React Native Testing Library, Detox E2E, mobile app testing, CI testing]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1516116216624-53e697fedbea?w=1200&q=80&auto=format&fit=crop
+---
+
+React Native apps are harder to test than web apps for one practical reason: the device layer. You can't run a mobile UI test in a headless Node process the way you can with jsdom. This constraint shapes your testing strategy in ways that differ from web.
+
+The right mental model: write as many tests as possible that don't touch the device, and reserve device-level tests for the flows where they're truly irreplaceable.
+
+## The Testing Pyramid
+
+For a React Native app, the layers are:
+
+1. **Unit tests (Jest)** — Pure functions, utilities, selectors, hooks with business logic
+2. **Component tests (RNTL)** — Component render output and user interactions, no device required
+3. **E2E tests (Detox)** — Critical user journeys on a real simulator/emulator
+
+The ratio should look something like 70% unit/component, 30% E2E. E2E tests are slow to run (minutes per test), brittle (depend on timing and device state), and expensive to maintain. Write them surgically for flows that, if broken, would directly lose users.
+
+## Unit Tests with Jest
+
+Unit tests are cheap to write and fast to run. Target business logic that exists in isolation from React and the device.
+
+Good unit test targets:
+- Data transformation functions
+- Form validation logic
+- State management selectors and reducers
+- API response parsers
+- Custom hooks (test with `@testing-library/react-hooks`)
+
+```typescript
+// utils/formatters.test.ts
+import { formatCurrency, truncateText } from '../utils/formatters'
+
+describe('formatCurrency', () => {
+  it('formats USD correctly', () => {
+    expect(formatCurrency(1234.56, 'USD')).toBe('$1,234.56')
+  })
+
+  it('handles zero', () => {
+    expect(formatCurrency(0, 'USD')).toBe('$0.00')
+  })
+})
+```
+
+For Zustand stores:
+
+```typescript
+// store/cart.test.ts
+import { useCartStore } from '../store/cart'
+import { act, renderHook } from '@testing-library/react'
+
+describe('cart store', () => {
+  beforeEach(() => useCartStore.setState({ items: [] }))
+
+  it('adds items correctly', () => {
+    const { result } = renderHook(() => useCartStore())
+    act(() => result.current.addItem({ id: '1', price: 10 }))
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.total).toBe(10)
+  })
+})
+```
+
+## Component Tests with React Native Testing Library
+
+RNTL tests render components in a test environment without a device. They cover the interaction between your component code and the React layer — what renders, how it responds to user input, what queries it fires.
+
+```typescript
+// components/LoginForm.test.tsx
+import { render, screen, fireEvent, waitFor } from '@testing-library/react-native'
+import { LoginForm } from '../components/LoginForm'
+
+const mockLogin = jest.fn()
+
+describe('LoginForm', () => {
+  it('shows validation error for empty email', async () => {
+    render(<LoginForm onLogin={mockLogin} />)
+    fireEvent.press(screen.getByText('Sign In'))
+    expect(await screen.findByText('Email is required')).toBeTruthy()
+    expect(mockLogin).not.toHaveBeenCalled()
+  })
+
+  it('calls onLogin with credentials on valid submission', async () => {
+    mockLogin.mockResolvedValue({ success: true })
+    render(<LoginForm onLogin={mockLogin} />)
+
+    fireEvent.changeText(screen.getByPlaceholderText('Email'), 'user@example.com')
+    fireEvent.changeText(screen.getByPlaceholderText('Password'), 'password123')
+    fireEvent.press(screen.getByText('Sign In'))
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith({
+        email: 'user@example.com',
+        password: 'password123',
+      })
+    })
+  })
+})
+```
+
+Two things to mock systematically:
+- **Navigation** (`@react-navigation/native`): mock `useNavigation` and `useRoute`
+- **API calls**: mock your API client, not the global `fetch`
+
+Don't test implementation details. Test what the user sees and can do.
+
+## E2E Tests with Detox
+
+Detox runs real tests against a real iOS simulator or Android emulator. Tests are slower (2–10s per action) and require build artifacts. Reserve them for the flows users can't survive being broken:
+
+- Login / signup flow
+- Core conversion funnel (onboarding → first value moment)
+- Payment / checkout flow
+- Critical background operations (push notification tap → correct screen)
+
+```javascript
+// e2e/login.test.js
+describe('Login Flow', () => {
+  beforeAll(async () => {
+    await device.launchApp({ newInstance: true })
+  })
+
+  it('should log in successfully', async () => {
+    await element(by.id('email-input')).typeText('test@example.com')
+    await element(by.id('password-input')).typeText('testpassword')
+    await element(by.id('login-button')).tap()
+    await expect(element(by.id('home-screen'))).toBeVisible()
+  })
+
+  it('should show error for invalid credentials', async () => {
+    await element(by.id('email-input')).typeText('wrong@example.com')
+    await element(by.id('password-input')).typeText('wrongpassword')
+    await element(by.id('login-button')).tap()
+    await expect(element(by.text('Invalid credentials'))).toBeVisible()
+  })
+})
+```
+
+Add `testID` props to interactive elements in your components — this is non-negotiable for reliable Detox tests.
+
+## CI Integration
+
+Run unit and component tests on every PR via GitHub Actions. E2E tests are expensive — run them on merge to main or on a nightly schedule.
+
+```yaml
+# .github/workflows/test.yml
+- name: Run unit and component tests
+  run: npx jest --ci --coverage
+
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+```
+
+For Detox in CI, use the Detox GitHub Action or configure a macOS runner. Detox Cloud (maintained by Wix) is the managed option if you want to avoid managing your own macOS infrastructure.
+
+---
+
+A well-structured test suite catches regressions before users do. If you're setting up a React Native project and want the testing infrastructure built correctly from the start, [our team can help](/contact).

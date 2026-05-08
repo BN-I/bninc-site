@@ -1,0 +1,280 @@
+---
+title: AI Safety in Production — Input Validation, Output Guardrails, and Audit Logging
+description: Practical defensive layers for production AI systems — detecting prompt injection, validating outputs, implementing rate limits, and building the audit trail you'll need for compliance.
+date: 2025-11-20
+category: AI Integration & Agents
+keywords: [AI safety production, prompt injection detection, LLM guardrails, AI output validation, AI rate limiting, AI audit logging, responsible AI]
+readingTime: 8
+coverImage: https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=1200&q=80&auto=format&fit=crop
+---
+
+Shipping an AI feature without defensive layers is a matter of when, not if, something goes wrong. Users will probe your system, accidentally or intentionally. Inputs will arrive outside the expected distribution. Outputs will occasionally be wrong or harmful. The defensive layers you build determine whether these events are incidents or footnotes in your logs.
+
+This is the safety architecture we apply to every production AI system.
+
+## Input Validation Layer
+
+Every user message should pass through validation before reaching the model. The goal isn't to block every conceivable attack — it's to catch obvious problems cheaply before spending money on LLM inference.
+
+### Prompt Injection Detection
+
+Prompt injection attempts try to override your system prompt. Common patterns:
+
+```typescript
+const INJECTION_PATTERNS = [
+  /ignore\s+(?:previous|all|above)\s+instructions/i,
+  /(?:system|assistant)\s*:\s*(?:you\s+are|forget|disregard)/i,
+  /jailbreak/i,
+  /DAN\s+mode/i,
+  /pretend\s+you\s+(?:are|have\s+no)\s+(?:restrictions|limits)/i,
+]
+
+function detectPromptInjection(input: string): boolean {
+  return INJECTION_PATTERNS.some((pattern) => pattern.test(input))
+}
+```
+
+Simple keyword detection catches 80% of naive attempts. For more sophisticated detection, use a classifier:
+
+```typescript
+async function classifyInputSafety(input: string): Promise<{
+  isSafe: boolean
+  reason?: string
+}> {
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001', // Fast and cheap for classification
+    max_tokens: 50,
+    system: 'Classify this user input. Reply with JSON: {"safe": true/false, "reason": "brief reason if unsafe"}',
+    messages: [{ role: 'user', content: input }],
+  })
+
+  try {
+    const result = JSON.parse((response.content[0] as Anthropic.TextBlock).text)
+    return { isSafe: result.safe, reason: result.reason }
+  } catch {
+    return { isSafe: true } // Fail open for classification errors
+  }
+}
+```
+
+Use Claude Haiku for classification — it's fast enough for real-time use and cheap enough to run on every request.
+
+### Input Sanitisation
+
+```typescript
+function sanitiseInput(input: string): string {
+  return input
+    .trim()
+    // Limit length
+    .slice(0, 4000)
+    // Remove null bytes
+    .replace(/\0/g, '')
+    // Normalise whitespace
+    .replace(/\s+/g, ' ')
+}
+
+function validateInput(input: string): { valid: boolean; error?: string } {
+  if (!input || input.trim().length === 0) {
+    return { valid: false, error: 'Message cannot be empty' }
+  }
+
+  if (input.length > 4000) {
+    return { valid: false, error: 'Message too long (maximum 4,000 characters)' }
+  }
+
+  if (detectPromptInjection(input)) {
+    return { valid: false, error: 'Invalid input detected' }
+  }
+
+  return { valid: true }
+}
+```
+
+## Output Validation Layer
+
+The model's output needs validation before it reaches the user. This is especially important for features that produce structured data, recommendations, or content that's displayed publicly.
+
+### Schema Validation
+
+For structured outputs, validate against the expected schema:
+
+```typescript
+import { z } from 'zod'
+
+const BookingResponseSchema = z.object({
+  intent: z.enum(['booking', 'inquiry', 'cancellation', 'escalate']),
+  response: z.string().min(10).max(1000),
+  suggestedSlots: z.array(z.object({
+    date: z.string(),
+    time: z.string(),
+    slotId: z.string(),
+  })).optional(),
+})
+
+async function validateStructuredOutput(raw: string): Promise<BookingResponse | null> {
+  try {
+    const parsed = JSON.parse(raw)
+    return BookingResponseSchema.parse(parsed)
+  } catch {
+    return null
+  }
+}
+```
+
+If validation fails, either retry the request or fall back to a safe default response.
+
+### Content Moderation
+
+For user-facing outputs, apply a content moderation check:
+
+```typescript
+async function moderateOutput(content: string): Promise<{
+  approved: boolean
+  flaggedCategories?: string[]
+}> {
+  // Use the moderation API if your provider offers one
+  // Or use a lightweight classifier
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 100,
+    system: `Check if this AI response is appropriate to show users. 
+Respond with JSON: {"approved": true/false, "categories": [list of concerns if not approved]}`,
+    messages: [{ role: 'user', content }],
+  })
+
+  try {
+    return JSON.parse((response.content[0] as Anthropic.TextBlock).text)
+  } catch {
+    return { approved: true } // Fail open for moderation errors
+  }
+}
+```
+
+## Rate Limiting
+
+Rate limiting prevents abuse and makes cost anomalies detectable before they become expensive.
+
+```typescript
+import { Redis } from '@upstash/redis'
+import { Ratelimit } from '@upstash/ratelimit'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(20, '1 m'), // 20 requests per minute per user
+  analytics: true,
+})
+
+async function checkRateLimit(userId: string): Promise<{
+  allowed: boolean
+  remaining: number
+  resetAt: Date
+}> {
+  const { success, remaining, reset } = await ratelimit.limit(userId)
+  return {
+    allowed: success,
+    remaining,
+    resetAt: new Date(reset),
+  }
+}
+```
+
+Track rate limits per user, not per IP — a single user behind a corporate proxy would share an IP with hundreds of others.
+
+Also track token consumption per user, not just request count. A user making 5 requests with 50,000 tokens each represents more risk than a user making 100 requests with 100 tokens each.
+
+## Audit Logging
+
+Every AI interaction should be logged. This is not optional — you need this for debugging, compliance, and improving the system.
+
+```typescript
+interface AuditLog {
+  id: string
+  userId: string
+  sessionId: string
+  timestamp: Date
+  input: string
+  sanitisedInput: string
+  output: string
+  model: string
+  promptVersion: string
+  inputTokens: number
+  outputTokens: number
+  latencyMs: number
+  validationPassed: boolean
+  moderationPassed: boolean
+  injectionDetected: boolean
+  metadata: Record<string, unknown>
+}
+
+async function logInteraction(log: AuditLog): Promise<void> {
+  // Store in your database with appropriate retention policy
+  await db.aiAuditLog.create({ data: log })
+
+  // Alert on anomalies
+  if (log.injectionDetected) {
+    await alerting.notify({
+      severity: 'medium',
+      message: `Prompt injection attempt detected for user ${log.userId}`,
+      details: { userId: log.userId, sessionId: log.sessionId },
+    })
+  }
+}
+```
+
+Set appropriate retention policies based on your compliance requirements. GDPR considerations apply — audit logs containing user messages may need to be deleted on request.
+
+## The Complete Request Pipeline
+
+```typescript
+async function handleAIRequest(
+  userId: string,
+  rawInput: string,
+  sessionId: string
+): Promise<{ response: string } | { error: string }> {
+  const startTime = Date.now()
+
+  // 1. Rate limit check
+  const { allowed, remaining } = await checkRateLimit(userId)
+  if (!allowed) {
+    return { error: 'Rate limit exceeded. Please wait before sending another message.' }
+  }
+
+  // 2. Input validation
+  const sanitised = sanitiseInput(rawInput)
+  const validation = validateInput(sanitised)
+  if (!validation.valid) {
+    return { error: validation.error! }
+  }
+
+  // 3. Safety classification
+  const safety = await classifyInputSafety(sanitised)
+  if (!safety.isSafe) {
+    await logInteraction({ /* ... */ injectionDetected: true })
+    return { error: "I can't help with that request." }
+  }
+
+  // 4. LLM call
+  const response = await callLLM(sanitised)
+
+  // 5. Output validation
+  const moderation = await moderateOutput(response)
+  if (!moderation.approved) {
+    await logInteraction({ /* ... */ moderationPassed: false })
+    return { error: "I wasn't able to generate an appropriate response. Please try rephrasing." }
+  }
+
+  // 6. Audit log
+  await logInteraction({
+    userId, sessionId, input: rawInput, sanitisedInput: sanitised,
+    output: response, latencyMs: Date.now() - startTime,
+    validationPassed: true, moderationPassed: true, injectionDetected: false,
+    // ... other fields
+  })
+
+  return { response }
+}
+```
+
+---
+
+Safety layers are not a compliance checkbox — they're what keeps an AI feature running reliably in production when users behave unexpectedly. We build all of these layers into every AI product we ship. If you're planning an AI integration, [our team ensures it's production-safe from day one](/contact).

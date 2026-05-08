@@ -1,0 +1,206 @@
+---
+title: Server Actions in Next.js — Replacing API Routes for Mutations
+description: How Server Actions work in Next.js 15, when to use them instead of API routes, how to handle validation and errors, and how to implement optimistic updates with useOptimistic.
+date: 2026-01-08
+category: Web Application Development
+keywords: [nextjs server actions, next.js mutations, useOptimistic nextjs, server action validation, nextjs form actions]
+readingTime: 7
+coverImage: https://images.unsplash.com/photo-1629654297299-c8506221ca97?w=1200&q=80&auto=format&fit=crop
+---
+
+Server Actions are functions marked `'use server'` that run on the server but can be called directly from client components. They eliminate the round-trip overhead of writing a `fetch('/api/something', { method: 'POST' })` call to your own API for every mutation.
+
+This sounds like a small convenience. In practice, it removes a significant amount of boilerplate and changes how you think about data mutations in Next.js.
+
+## What Server Actions Replace
+
+The conventional pattern for a form submission in Next.js:
+
+1. Write a route handler: `app/api/bookings/route.ts`
+2. Write a client-side fetch call with error handling
+3. Write a loading state
+4. Write a success/error handler
+
+With Server Actions, steps 1 and 2 collapse into a single function:
+
+```typescript
+// app/actions/bookings.ts
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { db } from '@/lib/db'
+import { CreateBookingSchema } from '@/lib/schemas'
+
+export async function createBooking(formData: FormData) {
+  const parsed = CreateBookingSchema.safeParse({
+    serviceType: formData.get('serviceType'),
+    date: formData.get('date'),
+    notes: formData.get('notes'),
+  })
+
+  if (!parsed.success) {
+    return { error: parsed.error.flatten() }
+  }
+
+  const booking = await db.booking.create({
+    data: {
+      ...parsed.data,
+      userId: await getAuthenticatedUserId(),
+      status: 'pending',
+    },
+  })
+
+  revalidatePath('/bookings') // Invalidate the bookings page cache
+  return { booking }
+}
+```
+
+```tsx
+// app/new-booking/page.tsx
+'use client'
+
+import { createBooking } from '@/app/actions/bookings'
+import { useActionState } from 'react'
+
+export function BookingForm() {
+  const [state, action, isPending] = useActionState(createBooking, null)
+
+  return (
+    <form action={action}>
+      <select name="serviceType">
+        <option value="consultation">Consultation</option>
+        <option value="treatment">Treatment</option>
+      </select>
+      <input type="date" name="date" required />
+      <textarea name="notes" placeholder="Any notes..." />
+      <button type="submit" disabled={isPending}>
+        {isPending ? 'Booking...' : 'Book Appointment'}
+      </button>
+      {state?.error && (
+        <p className="text-red-500">{state.error.formErrors[0]}</p>
+      )}
+    </form>
+  )
+}
+```
+
+`useActionState` (released in React 19) manages the pending state and last result automatically.
+
+## Typed Server Actions
+
+For better type safety with non-form data:
+
+```typescript
+// actions/bookings.ts
+'use server'
+
+import { z } from 'zod'
+
+const schema = z.object({
+  serviceType: z.enum(['consultation', 'treatment', 'followup']),
+  date: z.string().datetime(),
+})
+
+type ActionState = {
+  success?: boolean
+  error?: string
+  booking?: Booking
+}
+
+export async function createBooking(
+  _prevState: ActionState,
+  data: z.infer<typeof schema>
+): Promise<ActionState> {
+  const userId = await requireAuth() // throws redirect to /login if not authenticated
+
+  const booking = await db.booking.create({
+    data: { ...data, userId, status: 'pending' },
+  })
+
+  revalidatePath('/dashboard')
+  return { success: true, booking }
+}
+```
+
+## Optimistic Updates with useOptimistic
+
+`useOptimistic` lets you update the UI immediately while the server action is in flight, then reconcile with the real server response:
+
+```tsx
+'use client'
+
+import { useOptimistic, useTransition } from 'react'
+import { toggleBookmarkAction } from '@/actions/bookmarks'
+
+function ArticleCard({ article }: { article: Article }) {
+  const [isPending, startTransition] = useTransition()
+  const [optimisticBookmarked, setOptimisticBookmarked] = useOptimistic(
+    article.isBookmarked
+  )
+
+  function handleToggle() {
+    startTransition(async () => {
+      setOptimisticBookmarked(!optimisticBookmarked) // Instant UI update
+      await toggleBookmarkAction(article.id) // Server action
+    })
+  }
+
+  return (
+    <div>
+      <h2>{article.title}</h2>
+      <button onClick={handleToggle} disabled={isPending}>
+        {optimisticBookmarked ? '★ Bookmarked' : '☆ Bookmark'}
+      </button>
+    </div>
+  )
+}
+```
+
+If the server action fails, `useOptimistic` automatically reverts to the last confirmed value.
+
+## Error Handling
+
+Server Actions can throw errors like any server function. The difference from API routes: you don't send HTTP status codes. Instead, return typed error objects or throw specific error classes:
+
+```typescript
+'use server'
+
+import { redirect } from 'next/navigation'
+
+export async function deleteBooking(id: string) {
+  const user = await requireAuth()
+  const booking = await db.booking.findUnique({ where: { id } })
+
+  if (!booking) {
+    return { error: 'Booking not found' }
+  }
+
+  if (booking.userId !== user.id) {
+    return { error: 'Unauthorised' }
+  }
+
+  if (booking.status === 'completed') {
+    return { error: 'Cannot delete a completed booking' }
+  }
+
+  await db.booking.delete({ where: { id } })
+  revalidatePath('/bookings')
+  redirect('/bookings') // redirect() works inside Server Actions
+}
+```
+
+Never catch the `redirect()` or `notFound()` throw — these are special errors that Next.js handles. Let them propagate.
+
+## When to Still Use API Routes
+
+Server Actions are for mutations triggered from your own UI. Use API routes for:
+- Webhooks from external services (Stripe, GitHub, etc.)
+- Endpoints consumed by mobile apps
+- Third-party service callbacks
+- Anything that requires custom HTTP status codes or headers
+
+Server Actions always return a 200 status with the action result. If you need a 201, 400, or 403 status code for a consumer that reads it, use an API route.
+
+---
+
+Server Actions represent a meaningful ergonomic improvement for forms and mutations in Next.js. We use them as the default for all UI-triggered mutations in every new project. If you're building a Next.js application and want modern patterns from the start, [our team delivers production-ready code](/contact).

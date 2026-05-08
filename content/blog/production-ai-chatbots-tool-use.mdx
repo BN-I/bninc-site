@@ -1,0 +1,228 @@
+---
+title: Building Production AI Chatbots with Tool Use and Function Calling
+description: How to build reliable AI chatbots with tool use — defining tools, handling multi-turn conversations, streaming responses, error recovery, and conversation state management.
+date: 2025-12-18
+category: AI Integration & Agents
+keywords: [AI chatbot production, tool use LLM, function calling Claude, Claude tool use, AI assistant development, LLM tool calling]
+readingTime: 9
+coverImage: https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=1200&q=80&auto=format&fit=crop
+---
+
+An AI chatbot without tool use is a text generator. Tool use is what transforms a language model into a system that can take actions: look up real data, book appointments, query your database, send emails. Building this reliably in production requires handling state, errors, and the non-deterministic nature of LLMs in ways that typical API integrations don't.
+
+## Defining Tools
+
+Tools are functions you expose to the LLM, described with a JSON schema. The model decides when to call them based on the conversation.
+
+With Anthropic's Claude:
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk'
+
+const client = new Anthropic()
+
+const tools: Anthropic.Tool[] = [
+  {
+    name: 'get_availability',
+    description: 'Get available appointment slots for a specific date range. Use this when the user asks about availability or wants to book an appointment.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'string',
+          format: 'date',
+          description: 'Start date in YYYY-MM-DD format',
+        },
+        end_date: {
+          type: 'string',
+          format: 'date',
+          description: 'End date in YYYY-MM-DD format',
+        },
+        service_type: {
+          type: 'string',
+          enum: ['consultation', 'treatment', 'followup'],
+          description: 'Type of appointment',
+        },
+      },
+      required: ['start_date', 'service_type'],
+    },
+  },
+  {
+    name: 'create_booking',
+    description: 'Create a confirmed appointment booking. Only call this after confirming all details with the user.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        slot_id: { type: 'string' },
+        user_name: { type: 'string' },
+        user_email: { type: 'string', format: 'email' },
+        service_type: { type: 'string' },
+        notes: { type: 'string' },
+      },
+      required: ['slot_id', 'user_name', 'user_email', 'service_type'],
+    },
+  },
+]
+```
+
+**Tool descriptions are prompts.** The model decides whether to call a tool based on your description. Be specific about when to use each tool and what it returns.
+
+## The Tool Use Loop
+
+Tool calling is not a single request — it's a loop. The model may call multiple tools in sequence before arriving at a final answer:
+
+```typescript
+type Message = Anthropic.MessageParam
+
+async function runAgent(
+  userMessage: string,
+  conversationHistory: Message[]
+): Promise<string> {
+  const messages: Message[] = [
+    ...conversationHistory,
+    { role: 'user', content: userMessage },
+  ]
+
+  while (true) {
+    const response = await client.messages.create({
+      model: 'claude-opus-4-7',
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      tools,
+      messages,
+    })
+
+    // Add assistant's response to history
+    messages.push({ role: 'assistant', content: response.content })
+
+    // No tool calls — return the text response
+    if (response.stop_reason === 'end_turn') {
+      const textBlock = response.content.find((b) => b.type === 'text')
+      return textBlock?.text ?? ''
+    }
+
+    // Process tool calls
+    if (response.stop_reason === 'tool_use') {
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+
+      for (const block of response.content) {
+        if (block.type !== 'tool_use') continue
+
+        const result = await executeTool(block.name, block.input)
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: JSON.stringify(result),
+        })
+      }
+
+      // Return tool results and continue the loop
+      messages.push({ role: 'user', content: toolResults })
+    }
+  }
+}
+```
+
+## Tool Execution with Error Handling
+
+```typescript
+async function executeTool(
+  name: string,
+  input: Record<string, unknown>
+): Promise<unknown> {
+  try {
+    switch (name) {
+      case 'get_availability':
+        return await calendarService.getAvailability({
+          startDate: input.start_date as string,
+          endDate: input.end_date as string,
+          serviceType: input.service_type as string,
+        })
+
+      case 'create_booking':
+        return await bookingService.create({
+          slotId: input.slot_id as string,
+          userName: input.user_name as string,
+          userEmail: input.user_email as string,
+          serviceType: input.service_type as string,
+          notes: input.notes as string,
+        })
+
+      default:
+        return { error: `Unknown tool: ${name}` }
+    }
+  } catch (error) {
+    // Return structured error — don't throw. Let the model handle the failure.
+    return {
+      error: error instanceof Error ? error.message : 'An unexpected error occurred',
+    }
+  }
+}
+```
+
+Critical: return errors as data, don't throw. If tool execution throws, your agent loop breaks. Return a structured error object so the model can acknowledge the failure and handle it gracefully in its response.
+
+## Streaming Responses
+
+For user-facing chat, stream responses as they're generated rather than waiting for the complete message:
+
+```typescript
+async function* streamResponse(
+  userMessage: string,
+  history: Message[]
+): AsyncGenerator<string> {
+  const messages: Message[] = [
+    ...history,
+    { role: 'user', content: userMessage },
+  ]
+
+  const stream = await client.messages.stream({
+    model: 'claude-opus-4-7',
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    tools,
+    messages,
+  })
+
+  for await (const event of stream) {
+    if (
+      event.type === 'content_block_delta' &&
+      event.delta.type === 'text_delta'
+    ) {
+      yield event.delta.text
+    }
+  }
+}
+```
+
+Streaming while supporting tool use requires the streaming API to handle `tool_use` stop reasons — the full tool-use loop must still execute, but text delta events can be streamed to the UI as they arrive.
+
+## Conversation State Management
+
+Conversation history must be persisted. The model has no memory between API calls — you provide the entire history on each request.
+
+```typescript
+// Store in your database, keyed by session ID
+interface ConversationSession {
+  id: string
+  userId: string
+  messages: Anthropic.MessageParam[]
+  createdAt: Date
+  updatedAt: Date
+}
+
+async function getOrCreateSession(userId: string): Promise<ConversationSession> {
+  const existing = await db.conversation.findFirst({
+    where: { userId, updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+    orderBy: { updatedAt: 'desc' },
+  })
+  if (existing) return existing
+  return db.conversation.create({ data: { userId, messages: [] } })
+}
+```
+
+Prune conversation history to stay within context limits. A rolling window of the last 20 exchanges, plus a system-prompt summary of earlier context, is sufficient for most chatbot use cases.
+
+---
+
+Production AI chatbots are significantly more complex than a single API call with a prompt. The architecture — tool execution, conversation state, error handling, streaming — is engineering work that requires careful design. If you're building an AI assistant for your product, [our team designs and implements it correctly from the start](/contact).
