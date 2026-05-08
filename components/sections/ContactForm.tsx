@@ -1,79 +1,85 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { motion } from 'framer-motion'
-import { Loader } from 'lucide-react'
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { motion } from "framer-motion";
+import { Loader } from "lucide-react";
 
 const schema = z.object({
-  firstName: z.string().min(1, 'Required'),
-  lastName: z.string().min(1, 'Required'),
-  email: z.string().email('Valid email required'),
+  firstName: z.string().min(1, "Required"),
+  lastName: z.string().min(1, "Required"),
+  email: z.string().email("Valid email required"),
   company: z.string().optional(),
-  service: z.string().min(1, 'Please select a service'),
-  budget: z.string().min(1, 'Please select a budget'),
-  message: z.string().min(10, 'Please tell us a bit more'),
-})
+  service: z.string().min(1, "Please select a service"),
+  budget: z.string().min(1, "Please select a budget"),
+  message: z.string().min(10, "Please tell us a bit more"),
+});
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<typeof schema>;
 
 const serviceOptions = [
-  { value: '', label: 'Select a service' },
-  { value: 'mobile', label: 'Mobile App Development' },
-  { value: 'cross-platform', label: 'Cross-Platform Development' },
-  { value: 'web', label: 'Web Application Development' },
-  { value: 'ai', label: 'AI Integration & Agents' },
-  { value: 'multiple', label: 'Multiple services' },
-]
+  { value: "", label: "Select a service" },
+  { value: "mobile", label: "Mobile App Development" },
+  { value: "cross-platform", label: "Cross-Platform Development" },
+  { value: "web", label: "Web Application Development" },
+  { value: "ai", label: "AI Integration & Agents" },
+  { value: "multiple", label: "Multiple services" },
+];
 
 const budgetOptions = [
-  { value: '', label: 'Select a budget range' },
-  { value: 'under-10k', label: 'Under $10,000' },
-  { value: '10k-25k', label: '$10,000 – $25,000' },
-  { value: '25k-50k', label: '$25,000 – $50,000' },
-  { value: '50k-100k', label: '$50,000 – $100,000' },
-  { value: 'over-100k', label: 'Over $100,000' },
-]
+  { value: "", label: "Select a budget range" },
+  { value: "under-10k", label: "Under $10,000" },
+  { value: "10k-25k", label: "$10,000 – $25,000" },
+  { value: "25k-50k", label: "$25,000 – $50,000" },
+  { value: "50k-100k", label: "$50,000 – $100,000" },
+  { value: "over-100k", label: "Over $100,000" },
+];
 
 const inputClass =
-  'w-full bg-surface-card border border-teal-700/20 rounded px-4 py-3 font-body text-teal-950 placeholder:text-teal-100 focus:outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-400/15 transition-all duration-200 text-sm'
+  "w-full bg-surface-card border border-teal-700/20 rounded px-4 py-3 font-body text-teal-950 placeholder:text-teal-100 focus:outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-400/15 transition-all duration-200 text-sm";
 
 const errorInputClass =
-  'w-full bg-surface-card border border-teal-700 rounded px-4 py-3 font-body text-teal-950 placeholder:text-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-700/15 transition-all duration-200 text-sm'
+  "w-full bg-surface-card border border-teal-700 rounded px-4 py-3 font-body text-teal-950 placeholder:text-teal-100 focus:outline-none focus:ring-2 focus:ring-teal-700/15 transition-all duration-200 text-sm";
 
 export function ContactForm() {
-  const [isSuccess, setIsSuccess] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
     reset,
-  } = useForm<FormValues>({ resolver: zodResolver(schema) })
+  } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   async function onSubmit(_data: FormValues) {
-    await new Promise((r) => setTimeout(r, 1000))
-    setIsSuccess(true)
-    reset()
+    await new Promise((r) => setTimeout(r, 1000));
+    setIsSuccess(true);
+    reset();
   }
 
   return (
     <div>
-      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4" noValidate>
+      <form
+        onSubmit={handleSubmit(onSubmit)}
+        className="flex flex-col gap-4"
+        noValidate
+      >
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="font-body font-medium text-sm text-teal-700 block mb-1">
               First name
             </label>
             <input
-              placeholder="Aren"
-              {...register('firstName')}
+              placeholder="Kieran"
+              {...register("firstName")}
               className={errors.firstName ? errorInputClass : inputClass}
             />
             {errors.firstName && (
-              <p className="font-mono text-xs text-teal-700 mt-1">{errors.firstName.message}</p>
+              <p className="font-mono text-xs text-teal-700 mt-1">
+                {errors.firstName.message}
+              </p>
             )}
           </div>
           <div>
@@ -81,26 +87,32 @@ export function ContactForm() {
               Last name
             </label>
             <input
-              placeholder="Costanza"
-              {...register('lastName')}
+              placeholder="Doe"
+              {...register("lastName")}
               className={errors.lastName ? errorInputClass : inputClass}
             />
             {errors.lastName && (
-              <p className="font-mono text-xs text-teal-700 mt-1">{errors.lastName.message}</p>
+              <p className="font-mono text-xs text-teal-700 mt-1">
+                {errors.lastName.message}
+              </p>
             )}
           </div>
         </div>
 
         <div>
-          <label className="font-body font-medium text-sm text-teal-700 block mb-1">Email</label>
+          <label className="font-body font-medium text-sm text-teal-700 block mb-1">
+            Email
+          </label>
           <input
             type="email"
-            placeholder="aren@company.com"
-            {...register('email')}
+            placeholder="client@company.com"
+            {...register("email")}
             className={errors.email ? errorInputClass : inputClass}
           />
           {errors.email && (
-            <p className="font-mono text-xs text-teal-700 mt-1">{errors.email.message}</p>
+            <p className="font-mono text-xs text-teal-700 mt-1">
+              {errors.email.message}
+            </p>
           )}
         </div>
 
@@ -110,15 +122,17 @@ export function ContactForm() {
           </label>
           <input
             placeholder="Company name"
-            {...register('company')}
+            {...register("company")}
             className={inputClass}
           />
         </div>
 
         <div>
-          <label className="font-body font-medium text-sm text-teal-700 block mb-1">Service</label>
+          <label className="font-body font-medium text-sm text-teal-700 block mb-1">
+            Service
+          </label>
           <select
-            {...register('service')}
+            {...register("service")}
             className={errors.service ? errorInputClass : inputClass}
           >
             {serviceOptions.map((opt) => (
@@ -128,7 +142,9 @@ export function ContactForm() {
             ))}
           </select>
           {errors.service && (
-            <p className="font-mono text-xs text-teal-700 mt-1">{errors.service.message}</p>
+            <p className="font-mono text-xs text-teal-700 mt-1">
+              {errors.service.message}
+            </p>
           )}
         </div>
 
@@ -137,7 +153,7 @@ export function ContactForm() {
             Budget range
           </label>
           <select
-            {...register('budget')}
+            {...register("budget")}
             className={errors.budget ? errorInputClass : inputClass}
           >
             {budgetOptions.map((opt) => (
@@ -147,7 +163,9 @@ export function ContactForm() {
             ))}
           </select>
           {errors.budget && (
-            <p className="font-mono text-xs text-teal-700 mt-1">{errors.budget.message}</p>
+            <p className="font-mono text-xs text-teal-700 mt-1">
+              {errors.budget.message}
+            </p>
           )}
         </div>
 
@@ -158,11 +176,13 @@ export function ContactForm() {
           <textarea
             rows={5}
             placeholder="What are you building?"
-            {...register('message')}
+            {...register("message")}
             className={`${errors.message ? errorInputClass : inputClass} resize-none`}
           />
           {errors.message && (
-            <p className="font-mono text-xs text-teal-700 mt-1">{errors.message.message}</p>
+            <p className="font-mono text-xs text-teal-700 mt-1">
+              {errors.message.message}
+            </p>
           )}
         </div>
 
@@ -174,7 +194,7 @@ export function ContactForm() {
           {isSubmitting ? (
             <Loader className="w-4 h-4 animate-spin" />
           ) : (
-            'Send message →'
+            "Send message →"
           )}
         </button>
       </form>
@@ -192,16 +212,16 @@ export function ContactForm() {
         </motion.div>
       </AnimatePresenceWrapper>
     </div>
-  )
+  );
 }
 
 function AnimatePresenceWrapper({
   show,
   children,
 }: {
-  show: boolean
-  children: React.ReactNode
+  show: boolean;
+  children: React.ReactNode;
 }) {
-  if (!show) return null
-  return <>{children}</>
+  if (!show) return null;
+  return <>{children}</>;
 }
