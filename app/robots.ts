@@ -9,6 +9,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/api/', '/_next/', '/admin/'],
       },
     ],
-    sitemap: 'https://www.bninc.com/sitemap.xml',
+    sitemap: 'https://www.bitnetinc.com/sitemap.xml',
   }
 }

@@ -2,10 +2,10 @@ import type { Metadata } from 'next'
 
 export const siteConfig = {
   name: 'BNinc',
-  url: 'https://www.bninc.com',
+  url: 'https://www.bitnetinc.com',
   description:
     'BNinc builds mobile apps, cross-platform solutions, web applications, and AI-powered products.',
-  ogImage: 'https://www.bninc.com/og.png',
+  ogImage: 'https://www.bitnetinc.com/og.png',
 }
 
 export function buildMetadata(overrides: Partial<Metadata> & { canonical?: string }): Metadata {
