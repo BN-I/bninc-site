@@ -1,41 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { motion } from "framer-motion";
 import { Loader } from "lucide-react";
-
-const schema = z.object({
-  firstName: z.string().min(1, "Required"),
-  lastName: z.string().min(1, "Required"),
-  email: z.string().email("Valid email required"),
-  company: z.string().optional(),
-  service: z.string().min(1, "Please select a service"),
-  budget: z.string().min(1, "Please select a budget"),
-  message: z.string().min(10, "Please tell us a bit more"),
-});
-
-type FormValues = z.infer<typeof schema>;
-
-const serviceOptions = [
-  { value: "", label: "Select a service" },
-  { value: "mobile", label: "Mobile App Development" },
-  { value: "cross-platform", label: "Cross-Platform Development" },
-  { value: "web", label: "Web Application Development" },
-  { value: "ai", label: "AI Integration & Agents" },
-  { value: "multiple", label: "Multiple services" },
-];
-
-const budgetOptions = [
-  { value: "", label: "Select a budget range" },
-  { value: "under-10k", label: "Under $10,000" },
-  { value: "10k-25k", label: "$10,000 – $25,000" },
-  { value: "25k-50k", label: "$25,000 – $50,000" },
-  { value: "50k-100k", label: "$50,000 – $100,000" },
-  { value: "over-100k", label: "Over $100,000" },
-];
+import {
+  contactSchema,
+  budgetOptions,
+  serviceOptions,
+  type ContactFormValues,
+} from "@/lib/contact-schema";
+import { submitContact } from "@/app/contact/actions";
 
 const inputClass =
   "w-full bg-surface-card border border-teal-700/20 rounded px-4 py-3 font-body text-teal-950 placeholder:text-teal-100 focus:outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-400/15 transition-all duration-200 text-sm";
@@ -45,18 +22,28 @@ const errorInputClass =
 
 export function ContactForm() {
   const [isSuccess, setIsSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
     reset,
-  } = useForm<FormValues>({ resolver: zodResolver(schema) });
+  } = useForm<ContactFormValues>({ resolver: zodResolver(contactSchema) });
 
-  async function onSubmit(_data: FormValues) {
-    await new Promise((r) => setTimeout(r, 1000));
-    setIsSuccess(true);
-    reset();
+  async function onSubmit(data: ContactFormValues) {
+    setSubmitError(null);
+    setIsSuccess(false);
+    const result = await submitContact(data).catch(() => null);
+    if (result?.ok) {
+      setIsSuccess(true);
+      reset();
+    } else {
+      setSubmitError(
+        result?.error ??
+          "Something went wrong sending your message. Please try again or email support@bitnetinc.com.",
+      );
+    }
   }
 
   return (
@@ -66,6 +53,15 @@ export function ContactForm() {
         className="flex flex-col gap-4"
         noValidate
       >
+        <input
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          aria-hidden="true"
+          {...register("website")}
+          className="hidden"
+        />
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="font-body font-medium text-sm text-teal-700 block mb-1">
@@ -99,21 +95,40 @@ export function ContactForm() {
           </div>
         </div>
 
-        <div>
-          <label className="font-body font-medium text-sm text-teal-700 block mb-1">
-            Email
-          </label>
-          <input
-            type="email"
-            placeholder="client@company.com"
-            {...register("email")}
-            className={errors.email ? errorInputClass : inputClass}
-          />
-          {errors.email && (
-            <p className="font-mono text-xs text-teal-700 mt-1">
-              {errors.email.message}
-            </p>
-          )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="font-body font-medium text-sm text-teal-700 block mb-1">
+              Email
+            </label>
+            <input
+              type="email"
+              placeholder="client@company.com"
+              {...register("email")}
+              className={errors.email ? errorInputClass : inputClass}
+            />
+            {errors.email && (
+              <p className="font-mono text-xs text-teal-700 mt-1">
+                {errors.email.message}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="font-body font-medium text-sm text-teal-700 block mb-1">
+              Phone number
+            </label>
+            <input
+              type="tel"
+              autoComplete="tel"
+              placeholder="+1 (555) 123-4567"
+              {...register("phone")}
+              className={errors.phone ? errorInputClass : inputClass}
+            />
+            {errors.phone && (
+              <p className="font-mono text-xs text-teal-700 mt-1">
+                {errors.phone.message}
+              </p>
+            )}
+          </div>
         </div>
 
         <div>
@@ -186,6 +201,33 @@ export function ContactForm() {
           )}
         </div>
 
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            {...register("smsConsent")}
+            className="mt-0.5 w-4 h-4 shrink-0 accent-teal-400 cursor-pointer"
+          />
+          <span className="font-body text-xs text-teal-700 leading-relaxed">
+            Yes, I agree to receive text messages (SMS) from BNinc about my
+            inquiry and our services at the phone number provided. Message
+            frequency varies. Message and data rates may apply. Reply STOP to
+            opt out or HELP for help. Consent is not a condition of purchase.
+          </span>
+        </label>
+
+        <p className="font-body text-xs text-teal-700/80 leading-relaxed">
+          By submitting this form, you agree that BNinc may contact you by
+          phone call or email about your inquiry. See our{" "}
+          <Link href="/privacy" className="text-teal-400 underline hover:text-teal-950">
+            Privacy Policy
+          </Link>{" "}
+          and{" "}
+          <Link href="/terms" className="text-teal-400 underline hover:text-teal-950">
+            Terms &amp; Conditions
+          </Link>
+          .
+        </p>
+
         <button
           type="submit"
           disabled={isSubmitting}
@@ -198,6 +240,12 @@ export function ContactForm() {
           )}
         </button>
       </form>
+
+      {submitError && (
+        <p role="alert" className="font-body text-sm text-red-700 mt-4">
+          {submitError}
+        </p>
+      )}
 
       <AnimatePresenceWrapper show={isSuccess}>
         <motion.div

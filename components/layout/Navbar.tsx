@@ -7,6 +7,11 @@ import { ChevronDown, X, Menu } from "lucide-react";
 import { useScrollNav } from "@/lib/hooks/useScrollNav";
 import { services } from "@/lib/constants";
 
+const legalLinks = [
+  { href: "/privacy", label: "Privacy Policy", fullLabel: "Privacy Policy" },
+  { href: "/terms", label: "Terms", fullLabel: "Terms & Conditions" },
+];
+
 export function Navbar() {
   const scrolled = useScrollNav();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -33,7 +38,7 @@ export function Navbar() {
             </span>
           </Link>
 
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-6 lg:gap-8">
             <div
               className="relative"
               onMouseEnter={() => setDropdownOpen(true)}
@@ -109,9 +114,18 @@ export function Navbar() {
             >
               Contact
             </Link>
+            {legalLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="font-display font-bold text-teal-50/80 hover:text-white text-sm transition-colors"
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
 
-          <div className="hidden md:flex items-center gap-4">
+          <div className="hidden lg:flex items-center gap-4">
             <Link
               href="/contact"
               className="bg-teal-400 hover:bg-teal-700 px-5 py-2 rounded font-display font-bold text-white text-sm transition-colors"
@@ -137,7 +151,7 @@ export function Navbar() {
             animate={{ y: 0 }}
             exit={{ y: "-100%" }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="z-50 fixed inset-0 flex flex-col bg-teal-950 px-8 py-8"
+            className="z-50 fixed inset-0 flex flex-col bg-teal-950 px-8 py-8 overflow-y-auto"
           >
             <div className="flex justify-between items-center mb-12">
               <Link
@@ -211,6 +225,19 @@ export function Navbar() {
                   </motion.div>
                 ))}
               </div>
+            </div>
+
+            <div className="flex gap-6 my-8">
+              {legalLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setMobileOpen(false)}
+                  className="font-mono text-teal-50/60 hover:text-white text-xs uppercase tracking-wide transition-colors"
+                >
+                  {link.fullLabel}
+                </Link>
+              ))}
             </div>
 
             <Link
